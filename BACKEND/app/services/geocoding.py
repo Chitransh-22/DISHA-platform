@@ -1,12 +1,16 @@
 """
-DISHA Geocoding Service
-Provides offline, deterministic geocoding for Indian States, Union Territories,
-districts, and disaster-prone cities with precision indicators.
+DISHA Geocoding & Geographic Entity Resolution Service
+Provides offline deterministic geocoding for Indian States, Union Territories,
+districts, disaster hotspots, and high-speed compiled entity extraction.
 """
 
-from typing import Optional, Tuple
+import re
+from typing import Optional, Tuple, List, Dict, Any
 
-# Centroids for all Indian States & Union Territories
+# ============================================================
+# CENTROIDS FOR ALL INDIAN STATES & UNION TERRITORIES
+# ============================================================
+
 STATE_CENTROIDS = {
     "Andhra Pradesh": (15.9129, 79.7400),
     "Arunachal Pradesh": (28.2180, 94.7278),
@@ -46,7 +50,46 @@ STATE_CENTROIDS = {
     "Lakshadweep": (10.5667, 72.6417),
 }
 
-# Coordinates for 120+ key Indian disaster-prone districts and cities
+# Mapping of State Aliases & Sub-regions
+STATE_ALIASES = {
+    "Andhra Pradesh": ["andhra pradesh", "andhra", "visakhapatnam", "vizag", "vijayawada", "guntur", "tirupati", "kurnool", "nellore", "anantapur", "kakinada"],
+    "Arunachal Pradesh": ["arunachal pradesh", "arunachal", "itanagar", "tawang", "pasighat", "ziro", "changlang"],
+    "Assam": ["assam", "guwahati", "silchar", "dibrugarh", "jorhat", "nagaon", "kaziranga", "brahmaputra", "dhemaji", "barpeta", "morigaon", "cachar", "sivasagar", "golaghat", "lakhimpur", "tezpur", "karimganj", "dhubri", "goalpara", "baksa", "chirang", "kamrup", "hailakandi", "sonitpur"],
+    "Bihar": ["bihar", "patna", "gaya", "bhagalpur", "muzaffarpur", "purnia", "darbhanga", "kosi", "supaul", "madhepura", "saharsa", "katihar", "araria", "kishanganj", "motihari", "sitamarhi"],
+    "Chhattisgarh": ["chhattisgarh", "raipur", "bilaspur", "durg", "bastar", "korba", "rajnandgaon", "surguja", "dantewada"],
+    "Goa": ["goa", "panaji", "margao", "vasco", "mapusa"],
+    "Gujarat": ["gujarat", "ahmedabad", "surat", "vadodara", "rajkot", "bhavnagar", "kutch", "bhuj", "morbi", "jamnagar", "junagadh", "gandhinagar", "anand", "navsari", "valsad", "porbandar", "patan", "mehsana", "amreli", "surendranagar"],
+    "Haryana": ["haryana", "gurgaon", "gurugram", "faridabad", "panipat", "ambala", "karnal", "rohtak", "hisar", "sonipat", "panchkula"],
+    "Himachal Pradesh": ["himachal pradesh", "himachal", "shimla", "manali", "kullu", "mandi", "dharamshala", "kinnaur", "lahaul", "spiti", "chamba", "solan", "bilaspur", "kangra", "una", "hamirpur", "sirmaur"],
+    "Jharkhand": ["jharkhand", "ranchi", "jamshedpur", "dhanbad", "bokaro", "deoghar", "hazaribagh", "dumka"],
+    "Karnataka": ["karnataka", "bengaluru", "bangalore", "mysore", "mysuru", "hubli", "dharwad", "mangalore", "mangaluru", "belagavi", "belgaum", "udupi", "kodagu", "coorg", "shivamogga", "shimoga", "uttara kannada", "dakshina kannada", "hassan", "chikkamagaluru", "kalaburagi", "gulbarga", "bellary"],
+    "Kerala": ["kerala", "wayanad", "idukki", "kochi", "cochin", "thiruvananthapuram", "trivandrum", "kozhikode", "calicut", "munnar", "alappuzha", "alleppey", "kottayam", "malappuram", "thrissur", "palakkad", "kannur", "kollam", "pathanamthitta", "kasaragod", "ernakulam", "kalladi"],
+    "Madhya Pradesh": ["madhya pradesh", "bhopal", "indore", "gwalior", "jabalpur", "ujjain", "sagar", "rewa", "satna", "hoshangabad", "narmadapuram", "sehore"],
+    "Maharashtra": ["maharashtra", "mumbai", "pune", "nagpur", "thane", "nashik", "aurangabad", "chhatrapati sambhajinagar", "kolhapur", "konkan", "raigad", "ratnagiri", "sindhudurg", "satara", "solapur", "amravati", "nanded", "palghar", "jawhar", "marathwada", "vidarbha", "sangli", "akola", "latur", "dhule", "jalgaon", "chandrapur"],
+    "Manipur": ["manipur", "imphal", "churachandpur", "thoubal", "bishnupur", "senapati", "ukhrul"],
+    "Meghalaya": ["meghalaya", "shillong", "cherrapunji", "mawsynram", "tura", "jowai", "east khasi hills", "west garo hills"],
+    "Mizoram": ["mizoram", "aizawl", "lunglei", "champhai"],
+    "Nagaland": ["nagaland", "kohima", "dimapur", "mokokchung", "mon", "tuensang", "wokha"],
+    "Odisha": ["odisha", "orissa", "bhubaneswar", "cuttack", "puri", "balasore", "rourkela", "bhadrak", "kendrapara", "jagatsinghpur", "ganjam", "berhampur", "sambalpur", "koraput", "mayurbhanj", "kalahandi", "bolangir", "balangir", "angul", "dhenkanal", "jajpur", "khordha"],
+    "Punjab": ["punjab", "ludhiana", "amritsar", "jalandhar", "patiala", "bathinda", "mohali", "pathankot", "hoshiarpur", "gurdaspur", "ferozepur", "rupnagar", "ropar"],
+    "Rajasthan": ["rajasthan", "jaipur", "jodhpur", "udaipur", "kota", "bikaner", "ajmer", "bharatpur", "alwar", "sikar", "pali", "barmer", "jaisalmer", "nagaur", "chittorgarh", "sri ganganagar", "bhilwara"],
+    "Sikkim": ["sikkim", "gangtok", "namchi", "teesta", "mangan", "gyalshing", "singtam", "chungthang", "lhonak"],
+    "Tamil Nadu": ["tamil nadu", "tamilnadu", "chennai", "coimbatore", "madurai", "salem", "tiruchirappalli", "trichy", "tirunelveli", "tiruppur", "vellore", "thoothukudi", "tuticorin", "cuddalore", "nilgiris", "ooty", "kanchipuram", "thanjavur", "dindigul", "erode", "kanyakumari", "nagapattinam", "chengalpattu"],
+    "Telangana": ["telangana", "hyderabad", "warangal", "nizamabad", "karimnagar", "khammam", "ramagundam", "mahbubnagar", "nalgonda", "adilabad", "bhadradri kothagudem", "mancherial"],
+    "Tripura": ["tripura", "agartala", "udaipur", "dharmanagar", "kailashahar"],
+    "Uttar Pradesh": ["uttar pradesh", "lucknow", "kanpur", "varanasi", "agra", "noida", "ghaziabad", "prayagraj", "allahabad", "gorakhpur", "meerut", "bareilly", "aligarh", "moradabad", "saharanpur", "ayodhya", "faizabad", "jhansi", "muzaffarnagar", "mathura", "budaun", "rampur", "shahjahanpur", "firozabad", "etawah"],
+    "Uttarakhand": ["uttarakhand", "uttaranchal", "dehradun", "rishikesh", "haridwar", "chamoli", "joshimath", "nainital", "kedarnath", "badrinath", "uttarkashi", "rudraprayag", "pithoragarh", "tehri", "almora", "haldwani", "roorkee", "pauri", "champawat", "bageshwar", "udham singh nagar"],
+    "West Bengal": ["west bengal", "bengal", "kolkata", "howrah", "darjeeling", "siliguri", "birbhum", "durgapur", "asansol", "sunderbans", "jalpaiguri", "kalimpong", "malda", "murshidabad", "nadia", "north 24 parganas", "south 24 parganas", "hooghly", "paschim medinipur", "purba medinipur", "bankura", "purulia", "cooch behar", "alipurduar"],
+    "Delhi": ["delhi", "new delhi", "nct of delhi", "delhi-ncr", "ncr"],
+    "Jammu and Kashmir": ["jammu and kashmir", "jammu & kashmir", "jammu kashmir", "j&k", "kashmir", "jammu", "srinagar", "anantnag", "baramulla", "budgam", "pulwama", "kupwara", "shopian", "ganderbal", "bandipora", "kulgam", "poonch", "rajouri", "kathua", "udhampur", "doda", "ramban", "reasi", "kishtwar", "samba", "bhalesa"],
+    "Ladakh": ["ladakh", "leh", "kargil", "nubra", "drass", "zanskar"],
+    "Puducherry": ["puducherry", "pondicherry", "karaikal", "mahe", "yanam"],
+    "Chandigarh": ["chandigarh"],
+    "Andaman and Nicobar": ["andaman and nicobar", "andaman & nicobar", "port blair", "andaman", "nicobar", "havelock"],
+    "Dadra and Nagar Haveli and Daman and Diu": ["daman", "diu", "silvassa", "dadra and nagar haveli"],
+    "Lakshadweep": ["lakshadweep", "kavaratti", "agatti", "minicoy"],
+}
+
 CITY_DISTRICT_COORDINATES = {
     # Assam
     "guwahati": (26.1445, 91.7362),
@@ -63,6 +106,8 @@ CITY_DISTRICT_COORDINATES = {
     "golaghat": (26.5167, 93.9667),
     "lakhimpur": (27.3600, 94.1000),
     "kaziranga": (26.5775, 93.1711),
+    "dhubri": (26.0200, 89.9700),
+    "karimganj": (24.8700, 92.3500),
 
     # Uttarakhand
     "dehradun": (30.3165, 78.0322),
@@ -77,6 +122,9 @@ CITY_DISTRICT_COORDINATES = {
     "nainital": (29.3919, 79.4542),
     "pithoragarh": (29.5829, 80.2182),
     "tehri": (30.3800, 78.4800),
+    "almora": (29.5971, 79.6591),
+    "haldwani": (29.2183, 79.5130),
+    "roorkee": (29.8543, 77.8880),
 
     # Himachal Pradesh
     "shimla": (31.1048, 77.1734),
@@ -89,6 +137,7 @@ CITY_DISTRICT_COORDINATES = {
     "spiti": (32.2461, 78.0349),
     "chamba": (32.5534, 76.1258),
     "solan": (30.9045, 77.0967),
+    "kangra": (32.0998, 76.2691),
 
     # Kerala
     "wayanad": (11.6854, 76.1320),
@@ -101,6 +150,9 @@ CITY_DISTRICT_COORDINATES = {
     "kottayam": (9.5916, 76.5222),
     "malappuram": (11.0732, 76.0740),
     "thrissur": (10.5276, 76.2144),
+    "palakkad": (10.7867, 76.6548),
+    "kannur": (11.8745, 75.3704),
+    "kalladi": (11.5300, 76.1500),
 
     # Odisha
     "bhubaneswar": (20.2961, 85.8245),
@@ -112,6 +164,8 @@ CITY_DISTRICT_COORDINATES = {
     "jagatsinghpur": (20.2700, 86.1700),
     "ganjam": (19.3800, 85.0500),
     "rourkela": (22.2604, 84.8536),
+    "sambalpur": (21.4669, 83.9812),
+    "koraput": (18.8135, 82.7118),
 
     # West Bengal
     "kolkata": (22.5726, 88.3639),
@@ -123,6 +177,7 @@ CITY_DISTRICT_COORDINATES = {
     "durgapur": (23.5204, 87.3119),
     "jalpaiguri": (26.5400, 88.7200),
     "kalimpong": (27.0600, 88.4700),
+    "malda": (25.0108, 88.1411),
     "sunderbans": (21.9497, 89.1833),
 
     # Maharashtra
@@ -136,6 +191,9 @@ CITY_DISTRICT_COORDINATES = {
     "ratnagiri": (16.9902, 73.3120),
     "sindhudurg": (16.1179, 73.7042),
     "satara": (17.6805, 74.0183),
+    "palghar": (19.6967, 72.7654),
+    "jawhar": (19.9142, 73.2322),
+    "nanded": (19.1383, 77.3210),
 
     # Gujarat
     "ahmedabad": (23.0225, 72.5714),
@@ -165,6 +223,8 @@ CITY_DISTRICT_COORDINATES = {
     "baramulla": (34.1980, 74.3636),
     "leh": (34.1526, 77.5771),
     "kargil": (34.5539, 76.1349),
+    "doda": (33.1450, 75.5460),
+    "bhalesa": (33.0000, 75.8000),
 
     # Tamil Nadu
     "chennai": (13.0827, 80.2707),
@@ -210,6 +270,68 @@ CITY_DISTRICT_COORDINATES = {
     "chandigarh": (30.7333, 76.7794),
     "port blair": (11.6234, 92.7265),
 }
+
+# Pre-compile fast lookup structures
+_ALIAS_TO_STATE: Dict[str, str] = {}
+for canonical_state, aliases in STATE_ALIASES.items():
+    for alias in aliases:
+        _ALIAS_TO_STATE[alias.lower()] = canonical_state
+
+_ALL_LOC_KEYS = sorted(
+    list(set(_ALIAS_TO_STATE.keys()) | set(CITY_DISTRICT_COORDINATES.keys())),
+    key=len,
+    reverse=True,
+)
+
+_LOC_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in _ALL_LOC_KEYS) + r")\b",
+    re.IGNORECASE,
+)
+
+_INDIA_CONTEXT_PATTERN = re.compile(
+    r"\b(india|indian|national disaster|imd|ndrf|sdrf|cwc|ndma|mha|delhi-ncr|national highway|nh-\d+|state highway)\b",
+    re.IGNORECASE,
+)
+
+
+def detect_locations(text: str) -> Dict[str, Any]:
+    """
+    High-speed deterministic extraction of Indian states, union territories, districts,
+    and cities from normalized text using compiled dictionary automaton.
+    Returns: {"states": [...], "cities": [...], "locations": [...], "has_india": bool}
+    """
+    if not text:
+        return {"states": [], "cities": [], "locations": [], "has_india": False}
+
+    matches = _LOC_PATTERN.findall(text)
+    found_states = []
+    found_cities = []
+
+    for match in matches:
+        m_lower = match.lower()
+        # Check state alias mapping
+        if m_lower in _ALIAS_TO_STATE:
+            state = _ALIAS_TO_STATE[m_lower]
+            if state not in found_states:
+                found_states.append(state)
+        # Check city/district coordinates mapping
+        if m_lower in CITY_DISTRICT_COORDINATES:
+            city_name = m_lower.title()
+            if city_name not in found_cities:
+                found_cities.append(city_name)
+
+    has_india = bool(
+        found_states
+        or found_cities
+        or bool(_INDIA_CONTEXT_PATTERN.search(text))
+    )
+
+    return {
+        "states": found_states,
+        "cities": found_cities,
+        "locations": found_states + found_cities,
+        "has_india": has_india,
+    }
 
 
 def geocode_location(

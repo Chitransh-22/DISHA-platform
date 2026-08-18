@@ -65,12 +65,12 @@ async def get_disasters(
 
 @router.get("/rejected")
 async def get_rejected_news(
-    stage: Optional[str] = Query(None, description="Filter by stage (local or ai)"),
+    stage: Optional[str] = Query(None, description="Filter by stage (local, quality, ai, temporal_old, forecast)"),
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
 ):
     """
-    Retrieve news articles filtered out and rejected by local heuristics or AI.
+    Retrieve news articles filtered out and rejected by local heuristics, quality/recency, or AI.
     """
     query = {}
     if isinstance(stage, str) and stage:
@@ -93,18 +93,26 @@ async def get_rejected_news(
 @router.get("/stats")
 async def get_pipeline_stats():
     """
-    Get live overview stats of processed disasters, rejections, and AI usage.
+    Get live overview stats of processed disasters, rejections, pending AI queue, and AI usage.
     """
     total_disasters = disaster_events.count_documents({})
     total_rejected = rejected_news.count_documents({})
     local_rejected = rejected_news.count_documents({"stage": "local"})
+    quality_rejected = rejected_news.count_documents({"stage": "quality"})
     ai_rejected = rejected_news.count_documents({"stage": "ai"})
+    temporal_rejected = rejected_news.count_documents({"stage": "temporal_old"})
+    forecast_rejected = rejected_news.count_documents({"stage": "forecast"})
+    pending_ai = news_temp.count_documents({"status": "pending_ai"})
     total_temp = news_temp.count_documents({})
 
     return {
         "verified_disasters": total_disasters,
         "total_rejected": total_rejected,
         "rejected_by_local_filter": local_rejected,
+        "rejected_by_quality_filter": quality_rejected,
         "rejected_by_ai": ai_rejected,
+        "rejected_old_news": temporal_rejected,
+        "rejected_forecast_only": forecast_rejected,
+        "pending_ai_queue": pending_ai,
         "total_articles_seen": total_temp,
     }

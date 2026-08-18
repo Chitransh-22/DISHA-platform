@@ -1,16 +1,16 @@
 """
 DISHA Real-Time Disaster Intelligence Pipeline
-Master Ingestion, Pre-filtering, Scoring, AI Verification, and Event Deduplication Pipeline.
+Master Ingestion, Pre-filtering, Temporal Scoring, AI Verification, and Event Deduplication Pipeline.
 """
 
 import os
 import re
 import json
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from urllib.parse import quote
-from typing import List, Dict, Any, Optional
+from urllib.parse import quote, urlparse, parse_qs, urlunparse
+from typing import List, Dict, Any, Optional, Tuple, Set
 
 import feedparser
 import requests
@@ -22,9 +22,18 @@ load_dotenv(_backend_dir / ".env")
 load_dotenv()
 
 from app.database.mongodb import db
-from app.services.geocoding import geocode_location
+from app.services.geocoding import geocode_location, detect_locations
 from app.services.source_scorer import score_source
-from app.services.evidence_detector import detect_evidence, parse_published_date
+from app.services.temporal_extractor import (
+    parse_published_date,
+    extract_incident_date,
+    evaluate_freshness,
+    NEWS_MAX_AGE_HOURS,
+    NEWS_ACTIVE_AGE_HOURS,
+    NEWS_MAX_INCIDENT_AGE_HOURS,
+    NEWS_HISTORICAL_CUTOFF_DAYS,
+)
+from app.services.evidence_detector import detect_evidence
 from app.services.quality_scorer import score_article, MIN_LOCAL_CANDIDATE_SCORE
 from app.services.event_clustering import (
     pre_cluster_candidates,
@@ -33,8 +42,7 @@ from app.services.event_clustering import (
 )
 from app.services.gemini_controller import (
     QuotaController,
-    call_gemini_api,
-    parse_gemini_response,
+    validate_and_retry_gemini_batch,
     GEMINI_MODEL,
 )
 
@@ -42,11 +50,14 @@ from app.services.gemini_controller import (
 # CONFIGURATION
 # ============================================================
 
-GEMINI_BATCH_SIZE = int(os.getenv("GEMINI_BATCH_SIZE", "30"))
+GEMINI_BATCH_SIZE = int(os.getenv("GEMINI_BATCH_SIZE", "10"))
+NEWS_RESULTS_PER_QUERY = int(os.getenv("NEWS_RESULTS_PER_QUERY", "25"))
+MAX_PENDING_AI_RECOVERY = int(os.getenv("MAX_PENDING_AI_RECOVERY", "50"))
 GEMINI_CONFIDENCE_THRESHOLD = float(os.getenv("GEMINI_CONFIDENCE_THRESHOLD", "0.70"))
 GEMINI_AUTO_VERIFY_THRESHOLD = float(os.getenv("GEMINI_AUTO_VERIFY_THRESHOLD", "0.90"))
 ENABLE_CORROBORATION = os.getenv("ENABLE_CORROBORATION", "true").lower() == "true"
 ENABLE_GEOCODING = os.getenv("ENABLE_GEOCODING", "true").lower() == "true"
+MAX_AI_RETRIES = int(os.getenv("MAX_AI_RETRIES", "3"))
 
 # MongoDB Collections
 news_temp = db["news_temp"]
@@ -57,35 +68,57 @@ ai_usage = db["ai_usage"]
 quota_controller = QuotaController(ai_usage)
 
 # ============================================================
-# NEWS QUERIES
+# IMPACT-FOCUSED NEWS QUERY FAMILIES
 # ============================================================
 
 NEWS_QUERIES = [
+    # Flood & Inundation
     "flood India",
+    "flash flood India",
+    "flood rescue India",
+    "river overflow India",
+    "villages submerged India",
     "floods Assam OR Bihar OR Odisha OR Kerala OR Bengal",
-    "earthquake tremors India",
+
+    # Landslides
+    "landslide India",
+    "landslide deaths India",
+    "landslide rescue India",
+    "landslide trapped India",
     "landslide Himachal OR Uttarakhand OR Kerala OR Northeast",
-    "cyclone India IMD",
-    "heavy rainfall waterlogging India",
+
+    # Earthquake & Tremors
+    "earthquake tremors India",
+    "earthquake India damage",
+    "earthquake India casualties",
+
+    # Cyclone & Storms
+    "cyclone India landfall",
+    "cyclone India evacuation",
     "cloudburst Himachal OR Uttarakhand OR Kashmir",
+    "heavy rainfall waterlogging India",
+
+    # Fires & Industrial Disasters
+    "factory fire blaze India",
+    "fire India deaths",
+    "chemical leak OR gas leak India",
+    "explosion blast India",
+
+    # Collapse & Structural Failures
+    "building collapse India",
+    "bridge collapse India",
+    "tunnel collapse India",
+    "dam breach OR reservoir overflow India",
+
+    # Transport & High-Impact Emergencies
+    "train accident OR derailment India",
+    "bus accident gorge India",
     "lightning strike deaths India",
     "severe heatwave India deaths",
     "cold wave India deaths",
-    "forest fire wildfire India",
-    "avalanche Kashmir OR Ladakh OR Uttarakhand",
-    "dam breach OR reservoir overflow India",
-    "building collapse OR bridge collapse India",
-    "factory fire blaze India",
-    "chemical leak OR gas leak India",
-    "explosion blast India",
-    "train accident OR derailment India",
-    "bus plunges gorge India",
 ]
 
-# ============================================================
-# COMPREHENSIVE DISASTER KEYWORDS
-# ============================================================
-
+# Comprehensive Disaster Keywords Mapping
 DISASTERS = {
     "flood": [
         "flood", "floods", "flooding", "flooded", "flash flood", "flash floods",
@@ -146,7 +179,7 @@ DISASTERS = {
         "building collapse", "building collapses", "building collapsed",
         "structure collapse", "structure collapsed", "roof collapse", "roof collapsed",
         "bridge collapse", "bridge collapsed", "wall collapse", "wall collapsed",
-        "scaffolding collapse", "tunnel collapse"
+        "scaffolding collapse", "tunnel collapse", "tunnel accident"
     ],
     "fire_accident": [
         "massive fire", "major fire", "devastating fire", "blaze", "inferno",
@@ -170,59 +203,24 @@ DISASTERS = {
     ],
 }
 
-# Indian State Aliases & Cities
-STATE_ALIASES = {
-    "Andhra Pradesh": ["andhra pradesh", "andhra", "visakhapatnam", "vizag", "vijayawada", "guntur", "tirupati", "kurnool"],
-    "Arunachal Pradesh": ["arunachal pradesh", "arunachal", "itanagar", "tawang", "pasighat"],
-    "Assam": ["assam", "guwahati", "silchar", "dibrugarh", "jorhat", "nagaon", "kaziranga", "brahmaputra"],
-    "Bihar": ["bihar", "patna", "gaya", "bhagalpur", "muzaffarpur", "purnia", "darbhanga", "kosi"],
-    "Chhattisgarh": ["chhattisgarh", "raipur", "bilaspur", "durg", "bastar"],
-    "Goa": ["goa", "panaji", "margao"],
-    "Gujarat": ["gujarat", "ahmedabad", "surat", "vadodara", "rajkot", "bhavnagar", "kutch", "bhuj"],
-    "Haryana": ["haryana", "gurgaon", "gurugram", "faridabad", "panipat", "ambala", "karnal"],
-    "Himachal Pradesh": ["himachal pradesh", "himachal", "shimla", "manali", "kullu", "mandi", "dharamshala", "kinnaur", "lahaul"],
-    "Jharkhand": ["jharkhand", "ranchi", "jamshedpur", "dhanbad", "bokaro"],
-    "Karnataka": ["karnataka", "bengaluru", "bangalore", "mysore", "mysuru", "hubli", "mangalore", "belagavi"],
-    "Kerala": ["kerala", "wayanad", "idukki", "kochi", "cochin", "thiruvananthapuram", "trivandrum", "kozhikode", "calicut", "munnar"],
-    "Madhya Pradesh": ["madhya pradesh", "bhopal", "indore", "gwalior", "jabalpur", "ujjain"],
-    "Maharashtra": ["maharashtra", "mumbai", "pune", "nagpur", "thane", "nashik", "aurangabad", "kolhapur", "konkan"],
-    "Manipur": ["manipur", "imphal", "churachandpur"],
-    "Meghalaya": ["meghalaya", "shillong", "cherrapunji", "mawsynram"],
-    "Mizoram": ["mizoram", "aizawl"],
-    "Nagaland": ["nagaland", "kohima", "dimapur"],
-    "Odisha": ["odisha", "orissa", "bhubaneswar", "cuttack", "puri", "balasore", "rourkela"],
-    "Punjab": ["punjab", "ludhiana", "amritsar", "jalandhar", "patiala"],
-    "Rajasthan": ["rajasthan", "jaipur", "jodhpur", "udaipur", "kota", "bikaner", "ajmer"],
-    "Sikkim": ["sikkim", "gangtok", "namchi", "teesta"],
-    "Tamil Nadu": ["tamil nadu", "tamilnadu", "chennai", "coimbatore", "madurai", "salem", "tiruchirappalli"],
-    "Telangana": ["telangana", "hyderabad", "warangal", "nizamabad"],
-    "Tripura": ["tripura", "agartala"],
-    "Uttar Pradesh": ["uttar pradesh", "lucknow", "kanpur", "varanasi", "agra", "noida", "ghaziabad", "prayagraj", "allahabad", "gorakhpur", "meerut"],
-    "Uttarakhand": ["uttarakhand", "uttaranchal", "dehradun", "rishikesh", "haridwar", "chamoli", "joshimath", "nainital", "kedarnath", "badrinath", "uttarkashi"],
-    "West Bengal": ["west bengal", "bengal", "kolkata", "howrah", "darjeeling", "siliguri", "birbhum", "durgapur", "asansol", "sunderbans"],
-    "Delhi": ["delhi", "new delhi", "nct of delhi"],
-    "Jammu and Kashmir": ["jammu and kashmir", "jammu & kashmir", "jammu kashmir", "j&k", "kashmir", "jammu", "srinagar", "anantnag", "baramulla"],
-    "Ladakh": ["ladakh", "leh", "kargil"],
-    "Puducherry": ["puducherry", "pondicherry"],
-    "Chandigarh": ["chandigarh"],
-    "Andaman and Nicobar": ["andaman and nicobar", "andaman & nicobar", "port blair", "andaman", "nicobar"],
-}
-
 GLOBAL_EXCLUSIONS = [
-    r"\b(landslide victory|landslide win|election landslide|poll victory|bypoll|vote share|exit poll|assembly election|lok sabha|vidhan sabha|cabinet expansion)\b",
-    r"\b(cricket|century|wicket|ipl|trophy|world cup|innings|run drought|medal drought|goal scored|match highlights|badminton|olympics|football match)\b",
-    r"\b(box office|trailer release|teaser release|movie review|ott release|bollywood|tollywood|actor|actress|album release|song release|concert blast|party blast)\b",
-    r"\b(stock market|shares crash|startup valuation|sales explosion|population explosion|user explosion|market collapse|funding drought|talent drought|deal drought)\b",
-    r"\b(paper leak|exam leak|question paper leak|data leak|whatsapp leak|neet leak)\b",
-    r"\b(flash mob|flash sale|spread like wildfire|flood of applications|avalanche of comments|tsunami of memes|tsunami of debt)\b",
+    r"\b(landslide\s+victory|landslide\s+win|election\s+landslide|poll\s+victory|bypoll|vote\s+share|exit\s+poll|assembly\s+election|lok\s+sabha|vidhan\s+sabha|cabinet\s+expansion)\b",
+    r"\b(cricket|century|wicket|ipl|trophy|world\s+cup|innings|run\s+drought|medal\s+drought|goal\s+scored|match\s+highlights|badminton|olympics|football\s+match|karate\s+gold|gold\s+medal)\b",
+    r"\b(box\s+office|trailer\s+release|teaser\s+release|movie\s+review|ott\s+release|bollywood|tollywood|actor|actress|album\s+release|song\s+release|concert\s+blast|party\s+blast)\b",
+    r"\b(stock\s+market|shares\s+crash|startup\s+valuation|sales\s+explosion|population\s+explosion|user\s+explosion|market\s+collapse|funding\s+drought|talent\s+drought|deal\s+drought)\b",
+    r"\b(paper\s+leak|exam\s+leak|question\s+paper\s+leak|data\s+leak|whatsapp\s+leak|neet\s+leak)\b",
+    r"\b(flash\s+mob|flash\s+sale|spread\s+like\s+wildfire|flood\s+of\s+applications|avalanche\s+of\s+comments|tsunami\s+of\s+memes|tsunami\s+of\s+debt)\b",
 ]
 
 FOREIGN_ONLY_INDICATORS = [
-    r"\b(in usa|in us|in united states|in florida|in texas|in california|in japan|in china|in australia|in europe|in philippines|in indiana|in indonesia|in canada|in uk|in london)\b"
+    r"\b(in\s+(?:southern\s+|northern\s+|eastern\s+|western\s+)?(?:usa|us|united\s+states|florida|texas|california|japan|china|australia|europe|philippines|indiana|indonesia|canada|uk|london|south\s+sudan|hawaii|france|greece|spain|venezuela|colombia|afghanistan|pakistan|taiwan|mexico|brazil|chile))\b",
+    r"\b(in\s+los\s+angeles|in\s+new\s+york|in\s+san\s+francisco|in\s+florida|in\s+texas|in\s+california|in\s+paris|in\s+tokyo|in\s+beijing|in\s+sydney|in\s+toronto|in\s+lahore|in\s+karachi|in\s+islamabad|in\s+kabul|in\s+kathmandu|in\s+dhaka|in\s+colombo)\b",
+    r"\b(us\s+state|u\.s\.\s+state|california|los\s+angeles|venezuela|colombia|south\s+sudan|hawaii|indiana\s+flooding)\b",
 ]
 
 
 def clean_text(text: str) -> str:
+    """Removes HTML tags, punctuation, and extra whitespace."""
     if not text:
         return ""
     text = re.sub(r"<[^>]+>", " ", text)
@@ -232,7 +230,34 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-def detect_disaster_keywords(text: str) -> List[tuple]:
+def normalize_url(url: str) -> str:
+    """Strips tracking query parameters from URLs for canonical deduplication."""
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url)
+        scheme = parsed.scheme.lower()
+        netloc = parsed.netloc.lower()
+        path = parsed.path
+        qs = parse_qs(parsed.query)
+        clean_qs = {k: v for k, v in qs.items() if not k.startswith("utm_") and k not in ("fbclid", "gclid", "ocid")}
+        clean_query = "&".join(f"{k}={v[0]}" for k, v in clean_qs.items())
+        return urlunparse((scheme, netloc, path, parsed.params, clean_query, ""))
+    except Exception:
+        return url.strip()
+
+
+def generate_article_id(article: dict) -> str:
+    """Generates a stable sha256 hash using normalized URL or title."""
+    norm_url = normalize_url(article.get("url", ""))
+    if norm_url:
+        return hashlib.sha256(norm_url.encode("utf-8")).hexdigest()
+    raw_title = clean_text(article.get("title", ""))
+    return hashlib.sha256(raw_title.encode("utf-8")).hexdigest()
+
+
+def detect_disaster_keywords(text: str) -> List[Tuple[str, str]]:
+    """Detects matching disaster types and keywords in text."""
     found = []
     for disaster_type, keywords in DISASTERS.items():
         for keyword in keywords:
@@ -242,82 +267,103 @@ def detect_disaster_keywords(text: str) -> List[tuple]:
     return found
 
 
-def detect_locations(text: str) -> List[str]:
-    found_states = []
-    for canonical_state, aliases in STATE_ALIASES.items():
-        for alias in aliases:
-            if re.search(r"\b" + re.escape(alias) + r"\b", text):
-                if canonical_state not in found_states:
-                    found_states.append(canonical_state)
-                break
-    return found_states
-
-
-def is_excluded_headline(text: str) -> tuple[bool, str]:
+def is_excluded_headline(text: str) -> Tuple[bool, str]:
+    """Checks for metaphor, non-disaster sports/entertainment/exam, or foreign indicators."""
     for pattern in GLOBAL_EXCLUSIONS:
         if re.search(pattern, text):
             return True, "metaphor_or_non_disaster_topic"
 
+    has_india = bool(re.search(r"\b(india|indian|imd|ndrf|sdrf|delhi|mumbai|kerala|assam|bihar|uttarakhand|himachal|odisha|gujarat|bengal|kashmir|punjab|tamil nadu|karnataka|andhra|telangana|uttar pradesh|rajasthan|maharashtra|jharkhand|chhattisgarh|manipur|tripura|meghalaya|sikkim|goa|ladakh)\b", text))
     for foreign_pat in FOREIGN_ONLY_INDICATORS:
-        if re.search(foreign_pat, text) and not re.search(r"\b(india|indian)\b", text):
+        if re.search(foreign_pat, text) and not has_india:
             return True, "foreign_only_event"
 
     return False, ""
 
 
-def local_filter(article: dict) -> dict:
+def local_filter(article: dict, now_utc: Optional[datetime] = None) -> dict:
+    """
+    High-recall pre-filter. Removes obvious garbage (sports, metaphors, foreign events)
+    while ensuring articles with ground impact, trapped workers, SDRF rescues, or casualties
+    are eligible even without traditional disaster keywords.
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+
     title = article.get("title", "")
     summary = article.get("description", "")
-    full_text = clean_text(f"{title} {summary}")
+    full_text = f"{title} {summary}"
+    text_clean = clean_text(full_text)
 
     # 1. Global Exclusion check
-    excluded, reason = is_excluded_headline(full_text)
+    excluded, reason = is_excluded_headline(text_clean)
     if excluded:
         return {
             "passed": False,
             "reason": reason,
             "disasters": [],
             "locations": [],
+            "article_type": "METAPHOR" if reason == "metaphor_or_non_disaster_topic" else "FOREIGN_INCIDENT",
         }
 
-    # 2. Disaster Keyword Detection
-    disaster_hits = detect_disaster_keywords(full_text)
-    if not disaster_hits:
+    # 2. Location & Geographic Entity Detection
+    loc_res = detect_locations(full_text)
+    locations = loc_res.get("locations", [])
+    has_india = loc_res.get("has_india", False)
+
+    # 3. Ground Evidence & Disaster Category Extraction
+    pub_dt = parse_published_date(article.get("published_at"))
+    ev = detect_evidence(full_text, published_dt=pub_dt, now_utc=now_utc)
+    disaster_hits = detect_disaster_keywords(text_clean)
+
+    # Rejection of pure foreign events without India context
+    if (ev.get("is_foreign_only") or not has_india):
         return {
             "passed": False,
-            "reason": "no_disaster_keyword",
-            "disasters": [],
-            "locations": [],
-        }
-
-    # 3. Location Detection
-    locations = detect_locations(full_text)
-    has_india = bool(re.search(r"\b(india|indian|national disaster|imd|ndrf|sdrf)\b", full_text))
-
-    if not locations and not has_india:
-        return {
-            "passed": False,
-            "reason": "no_india_location_or_context",
+            "reason": "foreign_only_event" if ev.get("is_foreign_only") else "no_india_location_or_context",
             "disasters": [d[0] for d in disaster_hits],
-            "locations": [],
+            "locations": locations,
+            "article_type": "FOREIGN_INCIDENT" if ev.get("is_foreign_only") else ev.get("article_type", "UNKNOWN"),
+        }
+
+    # Eligibility Criteria (HIGH RECALL WITH MANDATORY INDIA CONTEXT)
+    # A candidate passes if has_india AND (disaster_hits OR ground impact OR emergency response)
+    is_eligible = (
+        bool(disaster_hits)
+        or ev["has_ground_impact"]
+        or ev["has_response"]
+    )
+
+    if not is_eligible:
+        return {
+            "passed": False,
+            "reason": "no_disaster_or_impact_evidence",
+            "disasters": [d[0] for d in disaster_hits],
+            "locations": locations,
+            "article_type": ev.get("article_type", "UNKNOWN"),
         }
 
     disaster_types = list({d[0] for d in disaster_hits})
+    if not disaster_types and ev["has_ground_impact"]:
+        disaster_types = ["emergency_incident"]
 
     return {
         "passed": True,
         "reason": "candidate",
         "disasters": disaster_types,
         "locations": locations,
+        "article_type": ev.get("article_type", "UNKNOWN"),
     }
 
 
-def generate_article_id(article: dict) -> str:
-    raw = article.get("url", "") or article.get("title", "")
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+def google_news(query: str, max_results: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Fetches articles from Google News RSS for a specified query.
+    Prioritizes the newest articles and limits output per query.
+    """
+    if max_results is None:
+        max_results = NEWS_RESULTS_PER_QUERY
 
-
-def google_news(query: str) -> List[Dict[str, Any]]:
     url = (
         "https://news.google.com/rss/search?"
         f"q={quote(query)}"
@@ -338,17 +384,34 @@ def google_news(query: str) -> List[Dict[str, Any]]:
         resp.raise_for_status()
         feed = feedparser.parse(resp.content)
 
+        entries = getattr(feed, "entries", [])
+        if not entries:
+            return []
+
+        # Sort entries by parsed published date descending to prioritize the newest articles
+        def _get_entry_published_ts(entry) -> float:
+            pub_str = entry.get("published", "")
+            dt = parse_published_date(pub_str)
+            return dt.timestamp() if dt else 0.0
+
+        sorted_entries = sorted(entries, key=_get_entry_published_ts, reverse=True)
+        selected_entries = sorted_entries[:max_results]
+
         articles = []
-        for item in getattr(feed, "entries", []):
+        for item in selected_entries:
             source = ""
             if hasattr(item, "source") and isinstance(item.source, dict):
                 source = item.source.get("title", "")
             elif hasattr(item, "source"):
                 source = getattr(item.source, "title", "")
 
+            raw_url = item.get("link", "")
+            norm_url = normalize_url(raw_url)
+
             article = {
                 "title": item.get("title", ""),
-                "url": item.get("link", ""),
+                "url": norm_url,
+                "raw_url": raw_url,
                 "published_at": item.get("published", ""),
                 "description": item.get("summary", ""),
                 "source": source,
@@ -364,17 +427,20 @@ def google_news(query: str) -> List[Dict[str, Any]]:
         return []
 
 
-def get_existing_article_ids(article_ids: List[str]) -> set:
+def get_existing_article_ids(article_ids: List[str]) -> Set[str]:
     """
-    Performs fast bulk lookups across MongoDB collections to find already-processed IDs.
+    Performs fast bulk lookups across MongoDB collections to identify previously processed or rejected IDs.
     """
     if not article_ids:
         return set()
 
     found_ids = set()
 
-    # Look in news_temp
-    for doc in news_temp.find({"_id": {"$in": article_ids}}, {"_id": 1}):
+    # Look in news_temp (only already finalized ones, not pending_ai)
+    for doc in news_temp.find(
+        {"_id": {"$in": article_ids}, "status": {"$in": ["processed", "processed_sibling", "rejected_local", "rejected_quality", "rejected_ai", "rejected_ai_sibling"]}},
+        {"_id": 1}
+    ):
         found_ids.add(doc["_id"])
 
     # Look in disaster_events
@@ -388,14 +454,41 @@ def get_existing_article_ids(article_ids: List[str]) -> set:
     return found_ids
 
 
+def get_pending_ai_candidates(max_count: int = 50) -> List[Dict[str, Any]]:
+    """
+    Retrieves pending AI candidates from news_temp for safe retry handling.
+    """
+    cursor = news_temp.find(
+        {
+            "status": "pending_ai",
+            "retry_count": {"$lt": MAX_AI_RETRIES},
+        }
+    ).sort("fetched_at", -1).limit(max_count)
+
+    pending = []
+    for doc in cursor:
+        pending.append(doc)
+    return pending
+
+
 def save_temp_article(article: dict, filter_result: dict, quality_result: Optional[dict] = None):
+    """Saves or updates processing state in news_temp."""
     article["local_filter"] = filter_result
     if quality_result:
         article["quality_score"] = quality_result
-    article["status"] = (
-        "pending_ai" if filter_result.get("passed") and (quality_result is None or quality_result.get("passed"))
-        else "rejected_local"
-    )
+        article["candidate_priority_score"] = quality_result.get("candidate_priority_score", 0.0)
+        article["article_type"] = quality_result.get("article_type", "UNKNOWN")
+        article["freshness_tier"] = quality_result.get("freshness_tier", "RECENT")
+
+    if not filter_result.get("passed"):
+        article["status"] = "rejected_local"
+    elif quality_result and not quality_result.get("passed"):
+        article["status"] = "rejected_quality"
+    else:
+        article["status"] = "pending_ai"
+
+    if "retry_count" not in article:
+        article["retry_count"] = 0
 
     news_temp.update_one(
         {"_id": article["_id"]},
@@ -410,20 +503,25 @@ def save_temp_article(article: dict, filter_result: dict, quality_result: Option
 
 def fetch_gnews() -> dict:
     """
-    Executes the production-grade DISHA disaster intelligence pipeline.
+    Executes the production DISHA disaster intelligence pipeline:
+    Current Queries -> RSS Ingestion -> Normalization -> Deduplication ->
+    High-Recall Local Filter -> True-Recency Quality Scoring ->
+    Priority Ranking -> Pre-Clustering -> Validated Gemini Verification ->
+    Selective Retries -> Fine-Grained Event Corroboration & Geocoding ->
+    Full Metrics Reporting.
     """
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 75)
     print("DISHA PRODUCTION DISASTER INTELLIGENCE PIPELINE")
-    print("=" * 70)
+    print("=" * 75)
 
     started_at = datetime.now(timezone.utc)
     all_articles = []
 
     # --------------------------------------------------------
-    # 1. RAW INGESTION
+    # 1. RAW INGESTION FROM GOOGLE NEWS
     # --------------------------------------------------------
     for query in NEWS_QUERIES:
-        print(f"[NEWS] Query: {query}")
+        print(f"[NEWS] Fetching query: {query}")
         articles = google_news(query)
         print(f"[NEWS] Found: {len(articles)}")
         all_articles.extend(articles)
@@ -436,11 +534,11 @@ def fetch_gnews() -> dict:
     # --------------------------------------------------------
     unique_articles = {}
     for article in all_articles:
-        url = article.get("url", "")
-        if not url:
+        art_id = article.get("_id")
+        if not art_id:
             continue
-        if url not in unique_articles:
-            unique_articles[url] = article
+        if art_id not in unique_articles:
+            unique_articles[art_id] = article
 
     duplicates_count = total_raw - len(unique_articles)
     print(f"[DEDUP] Unique articles: {len(unique_articles)} (Duplicates: {duplicates_count})")
@@ -448,20 +546,20 @@ def fetch_gnews() -> dict:
     # --------------------------------------------------------
     # 3. BULK DATABASE CHECK FOR EXISTING ARTICLES
     # --------------------------------------------------------
-    all_unique_ids = [a["_id"] for a in unique_articles.values()]
+    all_unique_ids = list(unique_articles.keys())
     existing_ids = get_existing_article_ids(all_unique_ids)
-    print(f"[DB] Already processed articles: {len(existing_ids)}")
+    print(f"[DB] Previously finalized articles: {len(existing_ids)}")
 
-    new_articles = [a for a in unique_articles.values() if a["_id"] not in existing_ids]
+    new_articles = [a for a_id, a in unique_articles.items() if a_id not in existing_ids]
 
     # --------------------------------------------------------
-    # 4. HARD LOCAL FILTERING
+    # 4. HARD LOCAL FILTERING (HIGH RECALL)
     # --------------------------------------------------------
     passed_local_filter = []
     local_rejected_count = 0
 
     for article in new_articles:
-        filter_res = local_filter(article)
+        filter_res = local_filter(article, now_utc=started_at)
         if filter_res["passed"]:
             article["local_filter"] = filter_res
             passed_local_filter.append(article)
@@ -477,6 +575,7 @@ def fetch_gnews() -> dict:
                         "url": article.get("url", ""),
                         "source": article.get("source", ""),
                         "reason": filter_res.get("reason"),
+                        "article_type": filter_res.get("article_type"),
                         "stage": "local",
                         "processed_at": datetime.now(timezone.utc).isoformat(),
                     }
@@ -484,19 +583,32 @@ def fetch_gnews() -> dict:
                 upsert=True,
             )
 
-    print(f"[FILTER] Passed Hard Filter: {len(passed_local_filter)} (Rejected: {local_rejected_count})")
+    print(f"[FILTER] Passed Local Filter: {len(passed_local_filter)} (Rejected: {local_rejected_count})")
 
     # --------------------------------------------------------
     # 5. QUALITY SCORING & INCIDENT EVIDENCE RANKING
     # --------------------------------------------------------
     quality_candidates = []
     quality_rejected_count = 0
+    old_news_rejected = 0
+    forecast_rejected = 0
+    foreign_rejected = 0
 
     for article in passed_local_filter:
         disasters = article["local_filter"].get("disasters", [])
         locations = article["local_filter"].get("locations", [])
-        q_res = score_article(article, disasters, locations)
+        q_res = score_article(article, disasters, locations, now=started_at)
         article["quality_score"] = q_res
+        article["candidate_priority_score"] = q_res.get("candidate_priority_score", 0.0)
+
+        # Track granular rejection categories
+        reasons = q_res.get("rejection_reasons", [])
+        if "old_incident_in_recent_article" in reasons or "historical_or_anniversary_story" in reasons:
+            old_news_rejected += 1
+        if "forecast_without_ground_impact" in reasons:
+            forecast_rejected += 1
+        if "foreign_exclusive_event" in reasons:
+            foreign_rejected += 1
 
         if q_res["passed"]:
             save_temp_article(article, article["local_filter"], q_res)
@@ -505,10 +617,12 @@ def fetch_gnews() -> dict:
             quality_rejected_count += 1
             save_temp_article(article, article["local_filter"], q_res)
             rejection_reason = (
-                q_res.get("rejection_reasons")[0]
-                if q_res.get("rejection_reasons")
+                reasons[0]
+                if reasons
                 else f"low_quality_score_{q_res.get('total_score')}"
             )
+            stage_name = "temporal_old" if ("old_incident" in rejection_reason or "historical" in rejection_reason) else "quality"
+
             rejected_news.update_one(
                 {"article_id": article["_id"]},
                 {
@@ -518,25 +632,48 @@ def fetch_gnews() -> dict:
                         "url": article.get("url", ""),
                         "source": article.get("source", ""),
                         "reason": rejection_reason,
+                        "article_type": q_res.get("article_type"),
+                        "freshness_tier": q_res.get("freshness_tier"),
                         "quality_score": q_res.get("total_score"),
-                        "stage": "quality",
+                        "stage": stage_name,
                         "processed_at": datetime.now(timezone.utc).isoformat(),
                     }
                 },
                 upsert=True,
             )
 
-    print(f"[SCORE] High-Quality Candidates: {len(quality_candidates)} (Rejected: {quality_rejected_count})")
+    print(f"[SCORE] High-Quality New Candidates: {len(quality_candidates)} (Rejected: {quality_rejected_count})")
 
     # --------------------------------------------------------
-    # 6. EVENT PRE-CLUSTERING & TOP-N SELECTION
+    # 6. PENDING AI QUEUE RECOVERY & PRIORITY RANKING
     # --------------------------------------------------------
-    gemini_candidates = pre_cluster_candidates(quality_candidates)
+    pending_ai_items = get_pending_ai_candidates(max_count=MAX_PENDING_AI_RECOVERY)
+    pending_retried_count = len(pending_ai_items)
+    print(f"[QUEUE] Pending AI candidates recovered for retry: {pending_retried_count}")
+
+    # Combine new quality candidates and pending AI candidates
+    all_ai_candidates_dict = {a["_id"]: a for a in quality_candidates}
+    for p_art in pending_ai_items:
+        if p_art["_id"] not in all_ai_candidates_dict:
+            all_ai_candidates_dict[p_art["_id"]] = p_art
+
+    combined_candidates = list(all_ai_candidates_dict.values())
+
+    # Sort descending by candidate_priority_score (True Recency + Ground Impact first)
+    combined_candidates.sort(
+        key=lambda c: c.get("candidate_priority_score", c.get("quality_score", {}).get("total_score", 0)),
+        reverse=True,
+    )
+
+    # --------------------------------------------------------
+    # 7. EVENT PRE-CLUSTERING & TOP-N SELECTION
+    # --------------------------------------------------------
+    gemini_candidates = pre_cluster_candidates(combined_candidates)
     pre_clusters_count = len(gemini_candidates)
-    print(f"[CLUSTER] Pre-Clustered Candidates for AI: {pre_clusters_count}")
+    print(f"[CLUSTER] Clustered Candidates for AI Verification: {pre_clusters_count}")
 
     # --------------------------------------------------------
-    # 7. QUOTA-AWARE GEMINI BATCH CLASSIFICATION
+    # 8. QUOTA-AWARE GEMINI BATCH CLASSIFICATION & VALIDATION
     # --------------------------------------------------------
     gemini_requests_count = 0
     gemini_articles_processed = 0
@@ -555,12 +692,10 @@ def fetch_gnews() -> dict:
             batch = gemini_candidates[i : i + GEMINI_BATCH_SIZE]
 
             if not quota_controller.can_make_request():
-                print("[GEMINI] Daily quota limit reached. Halting AI calls and keeping batch pending.")
+                print("[GEMINI] Daily quota limit reached. Retaining remaining batch in pending_ai queue.")
                 break
 
-            quota_controller.wait_for_slot()
-
-            print(f"[GEMINI] Classifying batch {i // GEMINI_BATCH_SIZE + 1} ({len(batch)} articles)...")
+            print(f"[GEMINI] Processing batch {i // GEMINI_BATCH_SIZE + 1} ({len(batch)} candidates)...")
             compact_articles = [
                 {
                     "id": a["_id"],
@@ -568,34 +703,40 @@ def fetch_gnews() -> dict:
                     "description": clean_text(a.get("description", ""))[:700],
                     "source": a.get("source", ""),
                     "published_at": a.get("published_at", ""),
+                    "extracted_incident_date": a.get("quality_score", {}).get("incident_date"),
+                    "extracted_locations": a.get("local_filter", {}).get("locations", []),
+                    "candidate_priority_score": a.get("candidate_priority_score", 0.0),
                 }
                 for a in batch
             ]
 
-            payload = {"articles": compact_articles}
-            raw_response = call_gemini_api(payload)
-            gemini_requests_count += 1
+            # Validate and selective retry missing IDs
+            results, calls_made = validate_and_retry_gemini_batch(
+                compact_articles,
+                quota_controller,
+                max_missing_retries=2,
+            )
+            gemini_requests_count += calls_made
             gemini_articles_processed += len(batch)
 
-            quota_controller.record_usage(
-                requests_count=1,
-                articles_count=len(batch),
-                estimated_tokens=len(str(payload)) // 4,
-            )
-
-            results = parse_gemini_response(raw_response) if raw_response else []
-
             if not results:
-                print("[GEMINI] No usable results for batch. Retaining as pending_ai.")
+                print("[GEMINI] Batch execution returned no valid results. Updating retry count and retaining as pending_ai.")
                 for art in batch:
                     news_temp.update_one(
                         {"_id": art["_id"]},
-                        {"$set": {"status": "pending_ai"}},
+                        {
+                            "$set": {
+                                "status": "pending_ai",
+                                "last_ai_attempt_at": datetime.now(timezone.utc).isoformat(),
+                            },
+                            "$inc": {"retry_count": 1},
+                        },
                     )
                 continue
 
             # Map results to batch articles
             batch_map = {a["_id"]: a for a in batch}
+            verified_ids = set()
 
             for res in results:
                 art_id = res.get("id")
@@ -603,23 +744,48 @@ def fetch_gnews() -> dict:
                 if not art:
                     continue
 
+                verified_ids.add(art_id)
                 is_disaster = bool(res.get("is_disaster", False))
+                is_current = bool(res.get("is_current", True))
+                is_hist = bool(res.get("is_historical", False))
+                is_forecast = bool(res.get("is_forecast_only", False))
+                is_india = bool(res.get("is_india", True))
+
                 try:
                     confidence = float(res.get("confidence", 0.0))
                 except (TypeError, ValueError):
                     confidence = 0.0
 
                 # ----------------------------------------------------
-                # AI REJECTION
+                # AI REJECTION LOGIC
                 # ----------------------------------------------------
-                if not is_disaster or confidence < GEMINI_CONFIDENCE_THRESHOLD:
-                    ai_rejected_count += 1
-                    rejection_reason = (
-                        res.get("reason")
-                        or ("gemini_non_disaster" if not is_disaster else "low_confidence")
-                    )
+                should_reject = (
+                    not is_disaster
+                    or not is_india
+                    or is_hist
+                    or is_forecast
+                    or not is_current
+                    or confidence < GEMINI_CONFIDENCE_THRESHOLD
+                )
 
-                    # Update representative
+                if should_reject:
+                    ai_rejected_count += 1
+                    if not is_india:
+                        rejection_reason = "foreign_disaster_not_in_india"
+                        stage_name = "foreign"
+                    elif is_hist or not is_current:
+                        rejection_reason = "historical_or_old_disaster_report"
+                        stage_name = "temporal_old"
+                    elif is_forecast:
+                        rejection_reason = "forecast_advisory_without_impact"
+                        stage_name = "forecast"
+                    elif not is_disaster:
+                        rejection_reason = res.get("reason") or "ai_non_disaster"
+                        stage_name = "ai"
+                    else:
+                        rejection_reason = f"low_ai_confidence_{confidence:.2f}"
+                        stage_name = "ai"
+
                     rejected_news.update_one(
                         {"article_id": art_id},
                         {
@@ -629,8 +795,9 @@ def fetch_gnews() -> dict:
                                 "url": art.get("url", ""),
                                 "source": art.get("source", ""),
                                 "reason": rejection_reason,
+                                "article_type": res.get("article_type", art.get("article_type")),
                                 "confidence": confidence,
-                                "stage": "ai",
+                                "stage": stage_name,
                                 "processed_at": datetime.now(timezone.utc).isoformat(),
                             }
                         },
@@ -641,7 +808,7 @@ def fetch_gnews() -> dict:
                         {"$set": {"status": "rejected_ai"}},
                     )
 
-                    # Also update sibling articles if any
+                    # Update sibling articles
                     for sib_id in art.get("cluster_sibling_ids", []):
                         if sib_id != art_id:
                             news_temp.update_one(
@@ -651,17 +818,18 @@ def fetch_gnews() -> dict:
                     continue
 
                 # ----------------------------------------------------
-                # AI VERIFIED DISASTER EVENT
+                # AI VERIFIED DISASTER EVENT CREATION / MERGE
                 # ----------------------------------------------------
                 ai_verified_count += 1
                 tier = "high" if confidence >= GEMINI_AUTO_VERIFY_THRESHOLD else "medium"
 
                 d_type = res.get("disaster_type") or art.get("local_filter", {}).get("disasters", ["other"])[0]
                 state_name = res.get("state")
+                district_name = res.get("district")
                 city_name = res.get("city")
-                incident_date = res.get("incident_date")
+                incident_date = res.get("incident_date") or art.get("quality_score", {}).get("incident_date")
 
-                # Fallback to local filter locations if Gemini omitted state
+                # Fallback to local filter locations if state omitted
                 if not state_name and art.get("local_filter", {}).get("locations"):
                     state_name = art["local_filter"]["locations"][0]
 
@@ -673,10 +841,12 @@ def fetch_gnews() -> dict:
                     disaster_type=d_type,
                     state=state_name,
                     city=city_name,
+                    district=district_name,
+                    incident_date=incident_date,
+                    title=art.get("title"),
                 )
 
                 if existing_event and ENABLE_CORROBORATION:
-                    # Update existing event
                     events_updated_count += 1
                     events_merged_count += len(art.get("cluster_sibling_ids", [art_id]))
 
@@ -688,7 +858,6 @@ def fetch_gnews() -> dict:
                         existing_event.get("evidence", []) + (res.get("evidence") or [])
                     ))
 
-                    # Elevate confidence/severity if new article has higher rating
                     new_confidence = max(existing_event.get("confidence", 0.0), confidence)
 
                     disaster_events.update_one(
@@ -714,17 +883,17 @@ def fetch_gnews() -> dict:
                     )
 
                 else:
-                    # Create new disaster event
                     events_created_count += 1
-                    event_id = generate_stable_event_id(d_type, state_name, city_name, incident_date)
+                    event_id = generate_stable_event_id(d_type, state_name, city=city_name, district=district_name, incident_date=incident_date)
 
-                    # Geocoding
+                    # Geocoding resolution
                     lat, lon, precision = None, None, "unknown"
                     if ENABLE_GEOCODING:
                         lat, lon, precision = geocode_location(
                             country="India",
                             state=state_name,
                             city=city_name,
+                            district=district_name,
                         )
                         if lat is not None and lon is not None:
                             geocoding_success_count += 1
@@ -738,7 +907,7 @@ def fetch_gnews() -> dict:
                     now_iso = datetime.now(timezone.utc).isoformat()
                     disaster_document = {
                         "event_id": event_id,
-                        "article_id": art_id,  # backward compatibility
+                        "article_id": art_id,
                         "title": art.get("title", ""),
                         "description": art.get("description", ""),
                         "url": art.get("url", ""),
@@ -752,10 +921,12 @@ def fetch_gnews() -> dict:
                             "model": GEMINI_MODEL,
                             "confidence": confidence,
                             "tier": tier,
+                            "article_type": res.get("article_type", "CURRENT_INCIDENT"),
                         },
                         "location": {
                             "country": "India",
                             "state": state_name,
+                            "district": district_name,
                             "city": city_name,
                             "latitude": lat,
                             "longitude": lon,
@@ -801,53 +972,75 @@ def fetch_gnews() -> dict:
                             {"$set": {"status": "processed_sibling"}},
                         )
 
+            # Handle unverified articles in batch
+            unverified_ids = set(batch_map.keys()) - verified_ids
+            for u_id in unverified_ids:
+                news_temp.update_one(
+                    {"_id": u_id},
+                    {
+                        "$set": {
+                            "status": "pending_ai",
+                            "last_ai_attempt_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                        "$inc": {"retry_count": 1},
+                    },
+                )
+
     # --------------------------------------------------------
-    # 8. PIPELINE SUMMARY & OBSERVABILITY
+    # 9. PIPELINE SUMMARY & OBSERVABILITY METRICS
     # --------------------------------------------------------
     finished_at = datetime.now(timezone.utc)
     duration = (finished_at - started_at).total_seconds()
 
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 75)
     print("DISHA PIPELINE SUMMARY")
-    print("=" * 70)
-    print(f"Raw articles:              {total_raw}")
-    print(f"URL duplicates:            {duplicates_count}")
-    print(f"Already processed:         {len(existing_ids)}")
-    print(f"Local rejected:            {local_rejected_count}")
-    print(f"Quality rejected:          {quality_rejected_count}")
-    print(f"Pre-clustered candidates:  {pre_clusters_count}")
-    print(f"Gemini candidates:         {len(gemini_candidates)}")
-    print(f"Gemini requests:           {gemini_requests_count}")
-    print(f"Gemini articles processed: {gemini_articles_processed}")
-    print(f"AI rejected:               {ai_rejected_count}")
-    print(f"AI verified:               {ai_verified_count}")
-    print(f"Events created:            {events_created_count}")
-    print(f"Events updated:            {events_updated_count}")
-    print(f"Events merged:             {events_merged_count}")
-    print(f"Geocoding success:         {geocoding_success_count}")
-    print(f"Geocoding failed:          {geocoding_failed_count}")
-    print(f"Duration:                  {duration:.2f}s")
-    print("=" * 70 + "\n")
+    print("=" * 75)
+    print(f"Raw articles fetched:       {total_raw}")
+    print(f"URL/Hash duplicates:        {duplicates_count}")
+    print(f"Already finalized:          {len(existing_ids)}")
+    print(f"New articles to process:    {len(new_articles)}")
+    print(f"Local filter rejected:      {local_rejected_count}")
+    print(f"Quality filter rejected:    {quality_rejected_count}")
+    print(f"  - Old news rejected:      {old_news_rejected}")
+    print(f"  - Forecast only rejected: {forecast_rejected}")
+    print(f"  - Foreign only rejected:  {foreign_rejected}")
+    print(f"Pending AI retried:         {pending_retried_count}")
+    print(f"Gemini candidates:          {len(gemini_candidates)}")
+    print(f"Gemini requests made:       {gemini_requests_count}")
+    print(f"Gemini articles evaluated:  {gemini_articles_processed}")
+    print(f"AI rejected:                {ai_rejected_count}")
+    print(f"AI verified:                {ai_verified_count}")
+    print(f"Events created:             {events_created_count}")
+    print(f"Events updated:             {events_updated_count}")
+    print(f"Events merged:              {events_merged_count}")
+    print(f"Geocoding success:          {geocoding_success_count}")
+    print(f"Geocoding failed:           {geocoding_failed_count}")
+    print(f"Duration:                   {duration:.2f}s")
+    print("=" * 75 + "\n")
 
     return {
         "status": "success",
-        "raw_articles": total_raw,
-        "url_duplicates": duplicates_count,
-        "already_processed": len(existing_ids),
+        "articles_fetched": total_raw,
+        "new_articles": len(new_articles),
+        "duplicates": duplicates_count,
+        "already_finalized": len(existing_ids),
         "local_rejected": local_rejected_count,
         "quality_rejected": quality_rejected_count,
-        "pre_clustered_candidates": pre_clusters_count,
-        "gemini_candidates": len(gemini_candidates),
+        "old_news_rejected": old_news_rejected,
+        "forecast_rejected": forecast_rejected,
+        "foreign_rejected": foreign_rejected,
+        "pending_retried": pending_retried_count,
+        "candidate_count": len(gemini_candidates),
         "gemini_requests": gemini_requests_count,
-        "gemini_articles_processed": gemini_articles_processed,
-        "ai_rejected": ai_rejected_count,
-        "ai_verified": ai_verified_count,
+        "gemini_processed": gemini_articles_processed,
+        "gemini_rejected": ai_rejected_count,
+        "gemini_verified": ai_verified_count,
         "events_created": events_created_count,
         "events_updated": events_updated_count,
         "events_merged": events_merged_count,
         "geocoding_success": geocoding_success_count,
         "geocoding_failed": geocoding_failed_count,
-        "duration_seconds": duration,
+        "processing_time": round(duration, 2),
     }
 
 

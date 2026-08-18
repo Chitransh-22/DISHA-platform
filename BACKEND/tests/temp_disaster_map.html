@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DISHA - Disaster Intelligence Situational Map</title>
+    
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-primary: #0b0f19;
+            --bg-secondary: #131b2e;
+            --bg-card: rgba(19, 27, 46, 0.92);
+            --border-color: #1f2d4d;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --sev-critical: #ef4444;
+            --sev-high: #f97316;
+            --sev-medium: #eab308;
+            --sev-low: #10b981;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header Navigation */
+        header {
+            background: linear-gradient(180deg, #111827 0%, #0b0f19 100%);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 1000;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-badge {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            font-weight: 800;
+            font-size: 13px;
+            letter-spacing: 1px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+        }
+
+        .brand h1 {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }
+
+        .brand-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+
+        /* Quick Stats */
+        .stats-bar {
+            display: flex;
+            gap: 16px;
+        }
+
+        .stat-item {
+            background: rgba(31, 41, 55, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .stat-value {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--accent-cyan);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Main Container */
+        .main-container {
+            display: flex;
+            flex: 1;
+            position: relative;
+            height: calc(100vh - 65px);
+        }
+
+        /* Map */
+        #map {
+            flex: 1;
+            height: 100%;
+            background-color: #0b0f19;
+        }
+
+        /* Control Sidebar */
+        .sidebar {
+            width: 380px;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            z-index: 500;
+            box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .search-box {
+            width: 100%;
+            background: #0b0f19;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: var(--text-main);
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-box:focus {
+            border-color: var(--accent-blue);
+        }
+
+        .filters-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        select {
+            flex: 1;
+            background: #0b0f19;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 10px;
+            color: var(--text-main);
+            font-size: 12px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .events-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .event-card {
+            background: rgba(11, 15, 25, 0.75);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .event-card:hover {
+            border-color: var(--accent-blue);
+            transform: translateY(-2px);
+            background: rgba(30, 41, 59, 0.8);
+        }
+
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .type-badge {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .sev-badge {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .sev-critical { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+        .sev-high { background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.4); }
+        .sev-medium { background: rgba(234, 179, 8, 0.2); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); }
+        .sev-low { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+
+        .card-title {
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.4;
+            color: #f1f5f9;
+            margin-bottom: 6px;
+        }
+
+        .card-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Custom Leaflet Popup */
+        .leaflet-popup-content-wrapper {
+            background: var(--bg-card) !important;
+            backdrop-filter: blur(12px);
+            color: var(--text-main) !important;
+            border: 1px solid var(--border-color);
+            border-radius: 12px !important;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+            padding: 6px;
+        }
+
+        .leaflet-popup-tip {
+            background: var(--bg-card) !important;
+            border: 1px solid var(--border-color);
+        }
+
+        .popup-content {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 13px;
+            line-height: 1.5;
+            max-width: 320px;
+        }
+
+        .popup-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 8px;
+            margin-bottom: 8px;
+        }
+
+        .popup-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 6px;
+        }
+
+        .popup-reason {
+            font-size: 12px;
+            color: #cbd5e1;
+            margin-bottom: 8px;
+            background: rgba(15, 23, 42, 0.5);
+            padding: 6px 8px;
+            border-radius: 6px;
+            border-left: 3px solid var(--accent-blue);
+        }
+
+        .popup-evidence-title {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--accent-cyan);
+            margin-bottom: 4px;
+        }
+
+        .popup-evidence-list {
+            list-style: none;
+            margin-bottom: 8px;
+        }
+
+        .popup-evidence-list li {
+            font-size: 11px;
+            color: #94a3b8;
+            padding-left: 12px;
+            position: relative;
+            margin-bottom: 2px;
+        }
+
+        .popup-evidence-list li::before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: var(--accent-cyan);
+        }
+
+        .popup-footer {
+            border-top: 1px solid var(--border-color);
+            padding-top: 6px;
+            margin-top: 6px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .popup-link {
+            color: #60a5fa;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .popup-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Custom Markers */
+        .custom-pin {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            border: 2px solid #ffffff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.9; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.9; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="brand">
+            <span class="brand-badge">DISHA</span>
+            <div>
+                <h1>Disaster Intelligence & Hazard Awareness Map</h1>
+                <div class="brand-sub">Real-Time Situational Ground Truth & Verified Events</div>
+            </div>
+        </div>
+
+        <div class="stats-bar">
+            <div class="stat-item">
+                <span class="stat-value" id="stat-total">0</span>
+                <span class="stat-label">Mapped Events</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="stat-critical">0</span>
+                <span class="stat-label">Critical / High</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="stat-states">0</span>
+                <span class="stat-label">States Impacted</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <div id="map"></div>
+
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <input type="text" id="searchInput" class="search-box" placeholder="Search event title, district, state..." />
+                
+                <div class="filters-row">
+                    <select id="typeFilter">
+                        <option value="all">All Disaster Types</option>
+                    </select>
+
+                    <select id="severityFilter">
+                        <option value="all">All Severities</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="events-list" id="eventsList"></div>
+        </div>
+    </div>
+
+    <script>
+        const eventsData = [{"event_id": "DISHA-BUILDING_COLLAPSE-UTTARAKHAN_CHAMOLI-20260814-BC7B", "article_id": "5c5e80740f17cd6f8e61bf58f775915e6ab96f5354f775b3df7a1b69fda62c7f", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 3, "sources": ["hindustantimes.com", "The New Indian Express", "The News Mill"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMimwFBVV95cUxNeS1SdUtlMnc2LTFhMFJJV3JZOV9Lc2p2VWZKUWZCTW1BRVY2RkEwakFCZm03WEpjSE5kWHNqYXRLSU5aR0VaYnF6N0RXbUdtVHo1dFVMV1pnczhwWUtjaUVxX2FPcnEtM1lFTHhZYnJZZzVhWEsyZ0o4eS1XVGpnOGxYSGVMWF9tVlFCdUpGYjFManFfZGx4cm1YSQ?oc=5\" target=\"_blank\">Seven dead, 12 rescued, three missing in Chamoli tunnel collapse</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">The News Mill</font>", "disaster_type": "building_collapse", "evidence": ["Search continues for two workers missing", "7 killed, 3 trapped", "under-construction tunnel in Uttarakhand's Chamoli collapses", "Chamoli tunnel accident", "seven dead 12 rescued three missing", "chamoli tunnel collapse"], "first_seen_at": "2026-08-18T19:09:57.805657+00:00", "incident_date": "2026-08-14", "last_updated_at": "2026-08-18T19:10:00.129020+00:00", "location": {"country": "India", "state": "Uttarakhand", "district": "Chamoli", "city": null, "latitude": 30.4, "longitude": 79.3333, "precision": "district"}, "processed_at": "2026-08-18T19:09:57.805657+00:00", "published_at": "Fri, 14 Aug 2026 16:22:32 GMT", "reason": "Seven workers died and three were missing after an under-construction tunnel collapsed in Chamoli, Uttarakhand.", "severity": "high", "source": "The News Mill", "source_articles": [{"article_id": "5c5e80740f17cd6f8e61bf58f775915e6ab96f5354f775b3df7a1b69fda62c7f", "title": "Seven dead, 12 rescued, three missing in Chamoli tunnel collapse - The News Mill", "url": "https://news.google.com/rss/articles/CBMimwFBVV95cUxNeS1SdUtlMnc2LTFhMFJJV3JZOV9Lc2p2VWZKUWZCTW1BRVY2RkEwakFCZm03WEpjSE5kWHNqYXRLSU5aR0VaYnF6N0RXbUdtVHo1dFVMV1pnczhwWUtjaUVxX2FPcnEtM1lFTHhZYnJZZzVhWEsyZ0o4eS1XVGpnOGxYSGVMWF9tVlFCdUpGYjFManFfZGx4cm1YSQ?oc=5", "source": "The News Mill", "published_at": "Fri, 14 Aug 2026 16:22:32 GMT"}, {"article_id": "ff2de254285aa71bd684bebc50d1f95dde1e97e3a3fd5277b5e1eddb01f9219a", "title": "7 killed, 3 trapped after under-construction tunnel in Uttarakhand's Chamoli collapses | India News - hindustantimes.com", "url": "https://news.google.com/rss/articles/CBMi7gFBVV95cUxQYmxxTHQzdnRqWWhJd1lIcXNrNVdRcVN6S2F0bEtxQkhhUUt3Tm5FcVVFX09YSWxSQndqTU13M1dzZmJiV0JXT1REbHJZRjBGSTdyRHlSWkppWjhFWWFCTHUzR2hKT2lwMThvOUJuN08xalg5SFRPTXlBV19qaFI0YXRXRGEzTXI0RDZ4Y1dEYjNuYnNrLTU0U2ZGLVhBTTJjMVV2QmxxSGpSVUdWMllFYnBYTUdwamdGZTVxQnFGRkFwZWl5enpKZThRVFhkNWhxYWdSdWdzZjJOcEJrTG1VZ1FoSWxVUUlKcDl3OEl30gHzAUFVX3lxTE91X1BwaTRQVWZpdmxkUlhUVy05eU1XYkJvNnNRN2xMTjJrdS1wX3NqSEFESzRVWVdxZ09sRnltbl9HV3N6VkstN29lakV1d2h3VWllZlJ3T0tVRF9BaWNxRXkwME14Z0Jyc3RDdWp5M1lmRXJtN1ZISldRNVBad2c3eG1Db3dfbFRZbThQemRNbnNlWmJjWGNDcXBlN1RVZDJNUUdtdC1kMlpyX1ZKbk14NVpTaGxQTHphYkF4TngxM3FxV1NFWUFzdFhmb0ZEWVE3eVlrSnlpQ2xYaXYwd2U0T3A1SUtQSnliZFF1T1hYUUVRQQ?oc=5", "source": "hindustantimes.com", "published_at": "Sat, 15 Aug 2026 01:43:16 GMT"}, {"article_id": "3a6fbff781906c349823aadd7b622a1c67c15c4efc9ac89772edf6b21510c594", "title": "Search continues for two workers missing after Chamoli tunnel accident - The New Indian Express", "url": "https://news.google.com/rss/articles/CBMivgFBVV95cUxONm5EODZ0aFlSdkxxVTRiZ0o3MEVZNGU1M0RoajN5b1ZYRXdoRENfa2pTR2lteTItUE1EUGZMd29OMENRUDdYT2dINVpmWnQtdkxxU2xPX1g4YTlLNnJ1TDlVSGZQRy1nYmw3TERlRDhrMU4yeG9Kc0UyUmNRZ2pEam55T1RsLWtRV053bW9YTDBJMjFQQ1J5YUtMWWoyOUUzMlpRM0ZoZUdDT25HMVNOekZ4R3hGRkNPelFMWTd30gHLAUFVX3lxTFBCVE1EcEtaSmtrOVBMT2sxRjU3S1hEWGhWUldzUUNxQy1yU1g2V1BpRUNlUGZIalJPUXloSzlzRmtaaWx1Y1phY2stRUw0clNBYmYtU0xmdTBTQ3JEN3Y4eTZuOHNHNWt0aDFxbW5KWm9kaHhYdEJHdjNJbWk1SGhNblRnTU02MG5DWGFaR1dfWUFCbm55Q2ZJOTVBaXpUV3MwandiRU9Vb0tHWUozcFR5cUNrUGo0QTA4cnRqbk81M05IMGtlT0Zkc25n?oc=5", "source": "The New Indian Express", "published_at": "Tue, 18 Aug 2026 06:31:04 GMT"}], "status": "active", "title": "Seven dead, 12 rescued, three missing in Chamoli tunnel collapse - The News Mill", "url": "https://news.google.com/rss/articles/CBMimwFBVV95cUxNeS1SdUtlMnc2LTFhMFJJV3JZOV9Lc2p2VWZKUWZCTW1BRVY2RkEwakFCZm03WEpjSE5kWHNqYXRLSU5aR0VaYnF6N0RXbUdtVHo1dFVMV1pnczhwWUtjaUVxX2FPcnEtM1lFTHhZYnJZZzVhWEsyZ0o4eS1XVGpnOGxYSGVMWF9tVlFCdUpGYjFManFfZGx4cm1YSQ?oc=5"}, {"event_id": "DISHA-LANDSLIDE-UTTARAKHAN_CHAMOLI-20260814-76CA", "article_id": "bad82f0d617a19173081cd2621b266d1e7815440b61e6e8eb40b6dacd8d2fe6a", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["The Times of India"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi9gFBVV95cUxPWHowcTNQeWxEWGdtbzNTMzF3a0tBRUdXRDE5Yml1b0Utc1RucEN1R3dXUGVNQXdVR2F0NEhhSk55S2V3Uld0YjM0M2lPNUR0a0ZfaWl4aGZwd2xMWVdvUjR6SkNFazRpZTBQMDhJbTZZS1B1bXRuRzBpN2Zjd2dfZ0JDUkRGVnBkM2dlRE56dU1SZEZ3UGZjYmZEY19nTnB2M2dUUjVnUGZReWxJbGxoMlVtNGE1NUtvN3V3V2psUklOaG5sOVpJQ2N5Y3FITmlDbk5BRFl1aWhaSVlqRnlXMDVOX1NOamdIUG8xNUljdWZSa3paTWfSAfsBQVVfeXFMTWhaTWdRSnFCbHNxbXRRbnNtOXphOVZ4UnRyWm13MzFZdk00TmJpSXRlMFpTZUY3aFM4dDVhVUV2WE14WDU5YXRiTkRWVFJPQzN2U1BCTmJSMXFIWHpYT01QeHl1RVZEajl1b1M2d2M2M2ZqZkJMUDlYUVFDMHVUQ09GZjdZUm5ELXB2RkdfUHhIcWlSeWZSQkswcGhqMElSczB2cmM3X1VaSkg0ZHJ0Q0xJT3NrNXVCVVFjWGpmNE54MzFoaFhzMjNpeGJybWZ6UFFJb1RIUE1TMEtJQUt3MFhfa3VHWnhIMDZsTUZuZ2hKSmdDVEpDZmNTU2s?oc=5\" target=\"_blank\">Uttarakhand Tunnel Landslide: 7 Workers Dead, 1 Missing; Rescue Operations Continue in Chamoli</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">The Times of India</font>", "disaster_type": "landslide", "evidence": ["7 Workers Dead, 1 Missing", "Uttarakhand Tunnel Landslide"], "first_seen_at": "2026-08-18T19:09:57.953179+00:00", "incident_date": "2026-08-14", "last_updated_at": "2026-08-18T19:09:57.953179+00:00", "location": {"country": "India", "state": "Uttarakhand", "district": "Chamoli", "city": null, "latitude": 30.4, "longitude": 79.3333, "precision": "district"}, "processed_at": "2026-08-18T19:09:57.953179+00:00", "published_at": "Fri, 14 Aug 2026 11:09:20 GMT", "reason": "A tunnel landslide in Chamoli, Uttarakhand killed seven workers and left one missing.", "severity": "high", "source": "The Times of India", "source_articles": [{"article_id": "bad82f0d617a19173081cd2621b266d1e7815440b61e6e8eb40b6dacd8d2fe6a", "title": "Uttarakhand Tunnel Landslide: 7 Workers Dead, 1 Missing; Rescue Operations Continue in Chamoli - The Times of India", "url": "https://news.google.com/rss/articles/CBMi9gFBVV95cUxPWHowcTNQeWxEWGdtbzNTMzF3a0tBRUdXRDE5Yml1b0Utc1RucEN1R3dXUGVNQXdVR2F0NEhhSk55S2V3Uld0YjM0M2lPNUR0a0ZfaWl4aGZwd2xMWVdvUjR6SkNFazRpZTBQMDhJbTZZS1B1bXRuRzBpN2Zjd2dfZ0JDUkRGVnBkM2dlRE56dU1SZEZ3UGZjYmZEY19nTnB2M2dUUjVnUGZReWxJbGxoMlVtNGE1NUtvN3V3V2psUklOaG5sOVpJQ2N5Y3FITmlDbk5BRFl1aWhaSVlqRnlXMDVOX1NOamdIUG8xNUljdWZSa3paTWfSAfsBQVVfeXFMTWhaTWdRSnFCbHNxbXRRbnNtOXphOVZ4UnRyWm13MzFZdk00TmJpSXRlMFpTZUY3aFM4dDVhVUV2WE14WDU5YXRiTkRWVFJPQzN2U1BCTmJSMXFIWHpYT01QeHl1RVZEajl1b1M2d2M2M2ZqZkJMUDlYUVFDMHVUQ09GZjdZUm5ELXB2RkdfUHhIcWlSeWZSQkswcGhqMElSczB2cmM3X1VaSkg0ZHJ0Q0xJT3NrNXVCVVFjWGpmNE54MzFoaFhzMjNpeGJybWZ6UFFJb1RIUE1TMEtJQUt3MFhfa3VHWnhIMDZsTUZuZ2hKSmdDVEpDZmNTU2s?oc=5", "source": "The Times of India", "published_at": "Fri, 14 Aug 2026 11:09:20 GMT"}], "status": "active", "title": "Uttarakhand Tunnel Landslide: 7 Workers Dead, 1 Missing; Rescue Operations Continue in Chamoli - The Times of India", "url": "https://news.google.com/rss/articles/CBMi9gFBVV95cUxPWHowcTNQeWxEWGdtbzNTMzF3a0tBRUdXRDE5Yml1b0Utc1RucEN1R3dXUGVNQXdVR2F0NEhhSk55S2V3Uld0YjM0M2lPNUR0a0ZfaWl4aGZwd2xMWVdvUjR6SkNFazRpZTBQMDhJbTZZS1B1bXRuRzBpN2Zjd2dfZ0JDUkRGVnBkM2dlRE56dU1SZEZ3UGZjYmZEY19nTnB2M2dUUjVnUGZReWxJbGxoMlVtNGE1NUtvN3V3V2psUklOaG5sOVpJQ2N5Y3FITmlDbk5BRFl1aWhaSVlqRnlXMDVOX1NOamdIUG8xNUljdWZSa3paTWfSAfsBQVVfeXFMTWhaTWdRSnFCbHNxbXRRbnNtOXphOVZ4UnRyWm13MzFZdk00TmJpSXRlMFpTZUY3aFM4dDVhVUV2WE14WDU5YXRiTkRWVFJPQzN2U1BCTmJSMXFIWHpYT01QeHl1RVZEajl1b1M2d2M2M2ZqZkJMUDlYUVFDMHVUQ09GZjdZUm5ELXB2RkdfUHhIcWlSeWZSQkswcGhqMElSczB2cmM3X1VaSkg0ZHJ0Q0xJT3NrNXVCVVFjWGpmNE54MzFoaFhzMjNpeGJybWZ6UFFJb1RIUE1TMEtJQUt3MFhfa3VHWnhIMDZsTUZuZ2hKSmdDVEpDZmNTU2s?oc=5"}, {"event_id": "DISHA-LANDSLIDE-MAHARASHTR_MUMBAI-20260812-C553", "article_id": "aa93c542b99d06841f78b05b56d06254136f6961db32185543907d7782a874f0", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["News18"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi3wFBVV95cUxQTzgxTk1oenJObVZKejFNcW5PSnFIVVpvdWk3dV9NOHpaTXhIZHM2eFZnU1Z5SXl2R1QtNThmMjlNY1dfSmEwektaZWJWbF9tcFJ2aGhIMWtWbjU0Y29RSlZENkRKV1M5MVBCLVk3MThkdkV6N2NRcHlwTzM2RWRhUVZ0R3BzczFlWkUxZWVDQnhkNDVfcV82Qi1fSzJRZVRVaWR6bm94Mmt1SDh4VHktRzM2aGIxbWlaNnRQeFpwcTRPRWhGSkJ0UkR6dmZuRlZpNTRmUEZtTEY0anV3cnJ30gHkAUFVX3lxTFBQYnVyQnpnLXpaelNCUWhzTHBXVk9NbnJmRWVSZzJfVnB0VU5lNXRGOTc5aWozWFZlUldPdEo5TlQtZHRuNnNHZDZZT3hEWEZSaEN1c2hzbU9oNTFkbkt5YU0tdHVtQlNpQ29iS1NqSURvZC1wY2tNMFVxNVg0NUpSMnM3RjNSTlFrM1R5QjFaUHBvTFQwcmJrTFh0Y2hzOHozYjhzUWxpa1p6ZDBOakRQVGNFaWd4ZmZqR0d4eXpPSWUtTVVLZjRqSm9Ba3BscDlBMlAwcGd1bTczYmsxcV9HTEptdA?oc=5\" target=\"_blank\">5 Dead, Several Trapped After Landslide In Mumbai's Kurla, Rescue Operation Underway</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">News18</font>", "disaster_type": "landslide", "evidence": ["5 dead several trapped after landslide", "landslide in mumbai s kurla"], "first_seen_at": "2026-08-18T19:09:58.048261+00:00", "incident_date": "2026-08-12", "last_updated_at": "2026-08-18T19:09:58.048261+00:00", "location": {"country": "India", "state": "Maharashtra", "district": "Mumbai", "city": "Mumbai", "latitude": 19.076, "longitude": 72.8777, "precision": "city"}, "processed_at": "2026-08-18T19:09:58.048261+00:00", "published_at": "Wed, 12 Aug 2026 01:41:45 GMT", "reason": "A landslide in Mumbai's Kurla region killed five people and left several trapped.", "severity": "high", "source": "News18", "source_articles": [{"article_id": "aa93c542b99d06841f78b05b56d06254136f6961db32185543907d7782a874f0", "title": "5 Dead, Several Trapped After Landslide In Mumbai's Kurla, Rescue Operation Underway - News18", "url": "https://news.google.com/rss/articles/CBMi3wFBVV95cUxQTzgxTk1oenJObVZKejFNcW5PSnFIVVpvdWk3dV9NOHpaTXhIZHM2eFZnU1Z5SXl2R1QtNThmMjlNY1dfSmEwektaZWJWbF9tcFJ2aGhIMWtWbjU0Y29RSlZENkRKV1M5MVBCLVk3MThkdkV6N2NRcHlwTzM2RWRhUVZ0R3BzczFlWkUxZWVDQnhkNDVfcV82Qi1fSzJRZVRVaWR6bm94Mmt1SDh4VHktRzM2aGIxbWlaNnRQeFpwcTRPRWhGSkJ0UkR6dmZuRlZpNTRmUEZtTEY0anV3cnJ30gHkAUFVX3lxTFBQYnVyQnpnLXpaelNCUWhzTHBXVk9NbnJmRWVSZzJfVnB0VU5lNXRGOTc5aWozWFZlUldPdEo5TlQtZHRuNnNHZDZZT3hEWEZSaEN1c2hzbU9oNTFkbkt5YU0tdHVtQlNpQ29iS1NqSURvZC1wY2tNMFVxNVg0NUpSMnM3RjNSTlFrM1R5QjFaUHBvTFQwcmJrTFh0Y2hzOHozYjhzUWxpa1p6ZDBOakRQVGNFaWd4ZmZqR0d4eXpPSWUtTVVLZjRqSm9Ba3BscDlBMlAwcGd1bTczYmsxcV9HTEptdA?oc=5", "source": "News18", "published_at": "Wed, 12 Aug 2026 01:41:45 GMT"}], "status": "active", "title": "5 Dead, Several Trapped After Landslide In Mumbai's Kurla, Rescue Operation Underway - News18", "url": "https://news.google.com/rss/articles/CBMi3wFBVV95cUxQTzgxTk1oenJObVZKejFNcW5PSnFIVVpvdWk3dV9NOHpaTXhIZHM2eFZnU1Z5SXl2R1QtNThmMjlNY1dfSmEwektaZWJWbF9tcFJ2aGhIMWtWbjU0Y29RSlZENkRKV1M5MVBCLVk3MThkdkV6N2NRcHlwTzM2RWRhUVZ0R3BzczFlWkUxZWVDQnhkNDVfcV82Qi1fSzJRZVRVaWR6bm94Mmt1SDh4VHktRzM2aGIxbWlaNnRQeFpwcTRPRWhGSkJ0UkR6dmZuRlZpNTRmUEZtTEY0anV3cnJ30gHkAUFVX3lxTFBQYnVyQnpnLXpaelNCUWhzTHBXVk9NbnJmRWVSZzJfVnB0VU5lNXRGOTc5aWozWFZlUldPdEo5TlQtZHRuNnNHZDZZT3hEWEZSaEN1c2hzbU9oNTFkbkt5YU0tdHVtQlNpQ29iS1NqSURvZC1wY2tNMFVxNVg0NUpSMnM3RjNSTlFrM1R5QjFaUHBvTFQwcmJrTFh0Y2hzOHozYjhzUWxpa1p6ZDBOakRQVGNFaWd4ZmZqR0d4eXpPSWUtTVVLZjRqSm9Ba3BscDlBMlAwcGd1bTczYmsxcV9HTEptdA?oc=5"}, {"event_id": "DISHA-BUILDING_COLLAPSE-WEST_BENGA_KOLKATA-20260818-2366", "article_id": "cffdb36f17523e220b7133761f34cfcfb400e8fe927e164fdde059839964f971", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["India Today"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMizgFBVV95cUxQanVia2FlS2xuQ2FmN1hQRTdqdHppbm5XQzdKYTdOVVl5dE83X3ZJd1Y2YmZXTk9KU2MtQTBsWU9CMWNsX0dkenNEc19fQ2l1bUVHdHZlZk5OQWtWMVFtR3NDTXZQUnNyUHphRExkRFFJTFVHLWgyRnA2d2E2YzVmTTYtQVE3XzNtWXpLZWxTSnNodC1xRjhjYnRzWThWUVZBbUlTbXhWVm8wUDdFOEw4dk84ZXV6eHNpYXZCTmtycjNwY05HT2hwNVA3em80QdIB0wFBVV95cUxPbWJxYkNWQXc4M1d5cEZYdV9XS0J6SGxOSHRnY2YxMkFyajJrTk05WW03V0ZTcVRHRDhjQ0hGekNFeTNqdW5KQU1HVUNSdVo0cjZWRnp6VzRsWW93R1B2REhObVdrVUlwRXVmOVpaeERVSFZRTmhlUDBBMmRaOF9kRGtaVlVHT3pORUMzMFZwZ3pfal9LdFkzei1oWlhjbDNSYzJETjg2VTBYUmVmUlpHbEJJQ0FGLVZreTZSR0NDUDNXZWNyT3FlN1BtYjdqRzJNQzhv?oc=5\" target=\"_blank\">1 dead, 15 injured as 3-storey building collapses in Kolkata after heavy rain</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">India Today</font>", "disaster_type": "building_collapse", "evidence": ["1 dead 15 injured", "3-storey building collapses in kolkata after heavy rain"], "first_seen_at": "2026-08-18T19:09:58.269905+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:09:58.269905+00:00", "location": {"country": "India", "state": "West Bengal", "district": "Kolkata", "city": "Kolkata", "latitude": 22.5726, "longitude": 88.3639, "precision": "city"}, "processed_at": "2026-08-18T19:09:58.269905+00:00", "published_at": "Tue, 18 Aug 2026 15:17:15 GMT", "reason": "A three-storey building collapsed in Kolkata following heavy rainfall, resulting in one death and 15 injuries.", "severity": "high", "source": "India Today", "source_articles": [{"article_id": "cffdb36f17523e220b7133761f34cfcfb400e8fe927e164fdde059839964f971", "title": "1 dead, 15 injured as 3-storey building collapses in Kolkata after heavy rain - India Today", "url": "https://news.google.com/rss/articles/CBMizgFBVV95cUxQanVia2FlS2xuQ2FmN1hQRTdqdHppbm5XQzdKYTdOVVl5dE83X3ZJd1Y2YmZXTk9KU2MtQTBsWU9CMWNsX0dkenNEc19fQ2l1bUVHdHZlZk5OQWtWMVFtR3NDTXZQUnNyUHphRExkRFFJTFVHLWgyRnA2d2E2YzVmTTYtQVE3XzNtWXpLZWxTSnNodC1xRjhjYnRzWThWUVZBbUlTbXhWVm8wUDdFOEw4dk84ZXV6eHNpYXZCTmtycjNwY05HT2hwNVA3em80QdIB0wFBVV95cUxPbWJxYkNWQXc4M1d5cEZYdV9XS0J6SGxOSHRnY2YxMkFyajJrTk05WW03V0ZTcVRHRDhjQ0hGekNFeTNqdW5KQU1HVUNSdVo0cjZWRnp6VzRsWW93R1B2REhObVdrVUlwRXVmOVpaeERVSFZRTmhlUDBBMmRaOF9kRGtaVlVHT3pORUMzMFZwZ3pfal9LdFkzei1oWlhjbDNSYzJETjg2VTBYUmVmUlpHbEJJQ0FGLVZreTZSR0NDUDNXZWNyT3FlN1BtYjdqRzJNQzhv?oc=5", "source": "India Today", "published_at": "Tue, 18 Aug 2026 15:17:15 GMT"}], "status": "active", "title": "1 dead, 15 injured as 3-storey building collapses in Kolkata after heavy rain - India Today", "url": "https://news.google.com/rss/articles/CBMizgFBVV95cUxQanVia2FlS2xuQ2FmN1hQRTdqdHppbm5XQzdKYTdOVVl5dE83X3ZJd1Y2YmZXTk9KU2MtQTBsWU9CMWNsX0dkenNEc19fQ2l1bUVHdHZlZk5OQWtWMVFtR3NDTXZQUnNyUHphRExkRFFJTFVHLWgyRnA2d2E2YzVmTTYtQVE3XzNtWXpLZWxTSnNodC1xRjhjYnRzWThWUVZBbUlTbXhWVm8wUDdFOEw4dk84ZXV6eHNpYXZCTmtycjNwY05HT2hwNVA3em80QdIB0wFBVV95cUxPbWJxYkNWQXc4M1d5cEZYdV9XS0J6SGxOSHRnY2YxMkFyajJrTk05WW03V0ZTcVRHRDhjQ0hGekNFeTNqdW5KQU1HVUNSdVo0cjZWRnp6VzRsWW93R1B2REhObVdrVUlwRXVmOVpaeERVSFZRTmhlUDBBMmRaOF9kRGtaVlVHT3pORUMzMFZwZ3pfal9LdFkzei1oWlhjbDNSYzJETjg2VTBYUmVmUlpHbEJJQ0FGLVZreTZSR0NDUDNXZWNyT3FlN1BtYjdqRzJNQzhv?oc=5"}, {"event_id": "DISHA-LANDSLIDE-HIMACHAL_P_SIRMAUR-20260818-F87A", "article_id": "35950c28068abfb47cba7967501c937fb9a238900b8b3425deef35b630adac97", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["India Today"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi0wFBVV95cUxPZ012YzduOEwwTU1xcXc3OWpjYVBYREl4Ynk5QnRLS3FfOEt5bktGSU0zQ3FQendBcG9IZHBNTmZzMVRXbVdQUGNhUEZCbXN0U19FWl9YWGoybklLOWd2RmJManFCWHUwSDJySWxRLUZGcEFaWlpBZFFKWHV6NUk2MUcyV0hFMDFqUDlmejl3WWl3d1RnR2lNU2dQX2hMQVp1Rnd0RXc3NkM3QUZlMXZqd2RiWU5WLUplNE9oTUN4UkV1d0FMeVFISnVlTGdJVW9IcG5n0gHYAUFVX3lxTE1HT3oxUDMtTkhLRm45X3JLVmpweUlqZmJtLXpLei1DTGRBUkRGeWVoNnFhdmRMTkV2NHRXRkpnaG1Qck9Ea3E3b3lNZzhhYnZDMTJvRHlETk8ycjZXWWRxZWc3dmVVbjdwVkkyUVIwNHh4UHI1M0xzbWJyNGlScVF0MjgyWmg0ZjNPVWk1dmFFY2wxaFEtVU5pY24xaDA3QVhfUGxSaGNFS0lHZ2R0NERLa3JrYlpVV0hlVXp6Y2lVMFZaYWVrejFjcDM2Y05abVpiZlhudnpSVg?oc=5\" target=\"_blank\">Landslide hits limestone mine in Himachal's Sirmaur, 3 dead; rescue ops on</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">India Today</font>", "disaster_type": "landslide", "evidence": ["landslide hits limestone mine", "3 dead; rescue ops on"], "first_seen_at": "2026-08-18T19:09:58.439543+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:09:58.439543+00:00", "location": {"country": "India", "state": "Himachal Pradesh", "district": "Sirmaur", "city": null, "latitude": 31.1048, "longitude": 77.1734, "precision": "state"}, "processed_at": "2026-08-18T19:09:58.439543+00:00", "published_at": "Tue, 18 Aug 2026 17:43:47 GMT", "reason": "A landslide hit a limestone mine in Sirmaur district of Himachal Pradesh, killing three people.", "severity": "high", "source": "India Today", "source_articles": [{"article_id": "35950c28068abfb47cba7967501c937fb9a238900b8b3425deef35b630adac97", "title": "Landslide hits limestone mine in Himachal's Sirmaur, 3 dead; rescue ops on - India Today", "url": "https://news.google.com/rss/articles/CBMi0wFBVV95cUxPZ012YzduOEwwTU1xcXc3OWpjYVBYREl4Ynk5QnRLS3FfOEt5bktGSU0zQ3FQendBcG9IZHBNTmZzMVRXbVdQUGNhUEZCbXN0U19FWl9YWGoybklLOWd2RmJManFCWHUwSDJySWxRLUZGcEFaWlpBZFFKWHV6NUk2MUcyV0hFMDFqUDlmejl3WWl3d1RnR2lNU2dQX2hMQVp1Rnd0RXc3NkM3QUZlMXZqd2RiWU5WLUplNE9oTUN4UkV1d0FMeVFISnVlTGdJVW9IcG5n0gHYAUFVX3lxTE1HT3oxUDMtTkhLRm45X3JLVmpweUlqZmJtLXpLei1DTGRBUkRGeWVoNnFhdmRMTkV2NHRXRkpnaG1Qck9Ea3E3b3lNZzhhYnZDMTJvRHlETk8ycjZXWWRxZWc3dmVVbjdwVkkyUVIwNHh4UHI1M0xzbWJyNGlScVF0MjgyWmg0ZjNPVWk1dmFFY2wxaFEtVU5pY24xaDA3QVhfUGxSaGNFS0lHZ2R0NERLa3JrYlpVV0hlVXp6Y2lVMFZaYWVrejFjcDM2Y05abVpiZlhudnpSVg?oc=5", "source": "India Today", "published_at": "Tue, 18 Aug 2026 17:43:47 GMT"}], "status": "active", "title": "Landslide hits limestone mine in Himachal's Sirmaur, 3 dead; rescue ops on - India Today", "url": "https://news.google.com/rss/articles/CBMi0wFBVV95cUxPZ012YzduOEwwTU1xcXc3OWpjYVBYREl4Ynk5QnRLS3FfOEt5bktGSU0zQ3FQendBcG9IZHBNTmZzMVRXbVdQUGNhUEZCbXN0U19FWl9YWGoybklLOWd2RmJManFCWHUwSDJySWxRLUZGcEFaWlpBZFFKWHV6NUk2MUcyV0hFMDFqUDlmejl3WWl3d1RnR2lNU2dQX2hMQVp1Rnd0RXc3NkM3QUZlMXZqd2RiWU5WLUplNE9oTUN4UkV1d0FMeVFISnVlTGdJVW9IcG5n0gHYAUFVX3lxTE1HT3oxUDMtTkhLRm45X3JLVmpweUlqZmJtLXpLei1DTGRBUkRGeWVoNnFhdmRMTkV2NHRXRkpnaG1Qck9Ea3E3b3lNZzhhYnZDMTJvRHlETk8ycjZXWWRxZWc3dmVVbjdwVkkyUVIwNHh4UHI1M0xzbWJyNGlScVF0MjgyWmg0ZjNPVWk1dmFFY2wxaFEtVU5pY24xaDA3QVhfUGxSaGNFS0lHZ2R0NERLa3JrYlpVV0hlVXp6Y2lVMFZaYWVrejFjcDM2Y05abVpiZlhudnpSVg?oc=5"}, {"event_id": "DISHA-FIRE_ACCIDENT-WEST_BENGA_BIRBHUM-20260817-5692", "article_id": "818067f021e8663d26d7ce4083083f2d78e48e724d159a2f67c7891b981b5414", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["The Times of India"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi9gFBVV95cUxOU3J4SkFiOXF0d3BUUl9kcnFxei1qVEFmVEZjZHZtZ2RWWkh1QXdiNndYNWJsYjJTcnFQSTFrblNfU3NIUFNvRlktZmFtSkRsbEVtcUlRUGhzeW1MS1JkdGdrVW1kaDFfNWZGa3JzamJrRXVzazVpWVh2VWZlSUNwMGZMd2NMNzA2MTBfOXdwdlp1MDd0TlZpUkxBSExzaWlkdDVBbEdXUE9hNkR0QmxWa3ZIcHlYYjFHY0ItUG5NUXgzU2cxSFlkVFhqX1QtMnRwcnBySWEzZHREamM4TkJ4WGRYUWl0Rkl2cWd3bEZWUWFzYjZjX1HSAfsBQVVfeXFMUFdjejFjaHR3cjFRdW4yd21QelU5Z192NzJ6dVJHek03VUJScFNWVl84V3RiLTQxTkU3ZjBzN3B5ZHItVl9TY0lqcE9MWEFuVkJKMU1MSEcxLUdONmt5SE9UM2h2OU1SaWprUExKS2VrUWJxSHpiVjNhMF9qZnBocEF6Y3FCVFFOYlgxWDFpci1KRFo1X2xSX3FBajctNXRGU0VpUGs3U3FTakpYeHNGY2NCMzRVVDc2T21WOW9JdE5iSWZIcHZ6MWE5eVlheEJFM0tSRzJpTlVEeVJvRXVncExKcDZGX0hZSzdFWGRpaXRaNXhXRkhpazNETVk?oc=5\" target=\"_blank\">7 Charred To Death, Several Injured In Fire At Hotel Near Tarapith Temple In Bengal's Birbhum</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">The Times of India</font>", "disaster_type": "fire_accident", "evidence": ["7 Charred To Death, Several Injured", "Fire At Hotel Near Tarapith Temple"], "first_seen_at": "2026-08-18T19:09:58.560518+00:00", "incident_date": "2026-08-17", "last_updated_at": "2026-08-18T19:09:58.560518+00:00", "location": {"country": "India", "state": "West Bengal", "district": "Birbhum", "city": null, "latitude": 23.84, "longitude": 87.61, "precision": "district"}, "processed_at": "2026-08-18T19:09:58.560518+00:00", "published_at": "Mon, 17 Aug 2026 05:59:35 GMT", "reason": "A major hotel fire near Tarapith Temple in Birbhum, West Bengal killed seven people and injured several others.", "severity": "high", "source": "The Times of India", "source_articles": [{"article_id": "818067f021e8663d26d7ce4083083f2d78e48e724d159a2f67c7891b981b5414", "title": "7 Charred To Death, Several Injured In Fire At Hotel Near Tarapith Temple In Bengal's Birbhum - The Times of India", "url": "https://news.google.com/rss/articles/CBMi9gFBVV95cUxOU3J4SkFiOXF0d3BUUl9kcnFxei1qVEFmVEZjZHZtZ2RWWkh1QXdiNndYNWJsYjJTcnFQSTFrblNfU3NIUFNvRlktZmFtSkRsbEVtcUlRUGhzeW1MS1JkdGdrVW1kaDFfNWZGa3JzamJrRXVzazVpWVh2VWZlSUNwMGZMd2NMNzA2MTBfOXdwdlp1MDd0TlZpUkxBSExzaWlkdDVBbEdXUE9hNkR0QmxWa3ZIcHlYYjFHY0ItUG5NUXgzU2cxSFlkVFhqX1QtMnRwcnBySWEzZHREamM4TkJ4WGRYUWl0Rkl2cWd3bEZWUWFzYjZjX1HSAfsBQVVfeXFMUFdjejFjaHR3cjFRdW4yd21QelU5Z192NzJ6dVJHek03VUJScFNWVl84V3RiLTQxTkU3ZjBzN3B5ZHItVl9TY0lqcE9MWEFuVkJKMU1MSEcxLUdONmt5SE9UM2h2OU1SaWprUExKS2VrUWJxSHpiVjNhMF9qZnBocEF6Y3FCVFFOYlgxWDFpci1KRFo1X2xSX3FBajctNXRGU0VpUGs3U3FTakpYeHNGY2NCMzRVVDc2T21WOW9JdE5iSWZIcHZ6MWE5eVlheEJFM0tSRzJpTlVEeVJvRXVncExKcDZGX0hZSzdFWGRpaXRaNXhXRkhpazNETVk?oc=5", "source": "The Times of India", "published_at": "Mon, 17 Aug 2026 05:59:35 GMT"}], "status": "active", "title": "7 Charred To Death, Several Injured In Fire At Hotel Near Tarapith Temple In Bengal's Birbhum - The Times of India", "url": "https://news.google.com/rss/articles/CBMi9gFBVV95cUxOU3J4SkFiOXF0d3BUUl9kcnFxei1qVEFmVEZjZHZtZ2RWWkh1QXdiNndYNWJsYjJTcnFQSTFrblNfU3NIUFNvRlktZmFtSkRsbEVtcUlRUGhzeW1MS1JkdGdrVW1kaDFfNWZGa3JzamJrRXVzazVpWVh2VWZlSUNwMGZMd2NMNzA2MTBfOXdwdlp1MDd0TlZpUkxBSExzaWlkdDVBbEdXUE9hNkR0QmxWa3ZIcHlYYjFHY0ItUG5NUXgzU2cxSFlkVFhqX1QtMnRwcnBySWEzZHREamM4TkJ4WGRYUWl0Rkl2cWd3bEZWUWFzYjZjX1HSAfsBQVVfeXFMUFdjejFjaHR3cjFRdW4yd21QelU5Z192NzJ6dVJHek03VUJScFNWVl84V3RiLTQxTkU3ZjBzN3B5ZHItVl9TY0lqcE9MWEFuVkJKMU1MSEcxLUdONmt5SE9UM2h2OU1SaWprUExKS2VrUWJxSHpiVjNhMF9qZnBocEF6Y3FCVFFOYlgxWDFpci1KRFo1X2xSX3FBajctNXRGU0VpUGs3U3FTakpYeHNGY2NCMzRVVDc2T21WOW9JdE5iSWZIcHZ6MWE5eVlheEJFM0tSRzJpTlVEeVJvRXVncExKcDZGX0hZSzdFWGRpaXRaNXhXRkhpazNETVk?oc=5"}, {"event_id": "DISHA-LANDSLIDE-ARUNACHAL_-20260815-C9F3", "article_id": "c4ecc1fc0673dd880b9392a549cfea74ded30f6087fed575bd36da9a738df387", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["India Today"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi5AFBVV95cUxPeEdXUGZRTDE2YkdXREtXQVBkdnJlTmZ6ZktRanV6eVE5Yldya0Itd1FBNUJ0Tmh1YU9RVnJSeDNjSTR1X2s5YlVKcV9EQU1NbUREZ3dDbDJKZUdfOUVXTm1YbXR2YUhVLXZ4R2dxUW02RmQ4OUZ1MzdSbGoxUEQzNzdMUzlWbEhpVl9xMVpYNWtPbEFTT2doYWpuZE9MRkdYN0w4aUVnVG42ZEdEbW9PZ0xoWlFVbDN3UEVHbHlZQkFEZmh3QlI5ZFNlX0d1emFFWHNseVlIZ1AyQnc4ekFmUE5PQXLSAeoBQVVfeXFMUExuck5BMFBfYVFRb1ZqQTV3Nm5Md1FMMkZkTFFwdzFKUXNqT0VUZmNFTHpYT2VRVUJXNjViSTRFQ0NLX19XYTVScm91bXlwZVdzenZLc2FIX1NEckNNVjM4cER5WXhxZ0dhcGZPNzN2YUxQd0FSWDBDMVg4RzRicURKOS1ONG0tSEY1MjhmcXBkNHo5VzBCbm9DZXM4dEFKOTVTMDBDcjd3QU84RU9tb2J3cXBWMXc5UmNrLWVveGRBcFhaWGdpODRXY1RzMGN4bjNsazNha3cydERoVXp0cno4YVZOQVR3Vmdn?oc=5\" target=\"_blank\">4 killed, 5 Armymen missing as heavy rain in Arunachal triggers landslide, floods</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">India Today</font>", "disaster_type": "landslide", "evidence": ["4 killed, 5 Armymen missing", "heavy rain in Arunachal triggers landslide, floods"], "first_seen_at": "2026-08-18T19:09:58.676730+00:00", "incident_date": "2026-08-15", "last_updated_at": "2026-08-18T19:09:58.676730+00:00", "location": {"country": "India", "state": "Arunachal Pradesh", "district": null, "city": null, "latitude": 28.218, "longitude": 94.7278, "precision": "state"}, "processed_at": "2026-08-18T19:09:58.676730+00:00", "published_at": "Sat, 15 Aug 2026 06:31:57 GMT", "reason": "Heavy rainfall in Arunachal Pradesh triggered landslides and floods, killing four people and leaving five soldiers missing.", "severity": "high", "source": "India Today", "source_articles": [{"article_id": "c4ecc1fc0673dd880b9392a549cfea74ded30f6087fed575bd36da9a738df387", "title": "4 killed, 5 Armymen missing as heavy rain in Arunachal triggers landslide, floods - India Today", "url": "https://news.google.com/rss/articles/CBMi5AFBVV95cUxPeEdXUGZRTDE2YkdXREtXQVBkdnJlTmZ6ZktRanV6eVE5Yldya0Itd1FBNUJ0Tmh1YU9RVnJSeDNjSTR1X2s5YlVKcV9EQU1NbUREZ3dDbDJKZUdfOUVXTm1YbXR2YUhVLXZ4R2dxUW02RmQ4OUZ1MzdSbGoxUEQzNzdMUzlWbEhpVl9xMVpYNWtPbEFTT2doYWpuZE9MRkdYN0w4aUVnVG42ZEdEbW9PZ0xoWlFVbDN3UEVHbHlZQkFEZmh3QlI5ZFNlX0d1emFFWHNseVlIZ1AyQnc4ekFmUE5PQXLSAeoBQVVfeXFMUExuck5BMFBfYVFRb1ZqQTV3Nm5Md1FMMkZkTFFwdzFKUXNqT0VUZmNFTHpYT2VRVUJXNjViSTRFQ0NLX19XYTVScm91bXlwZVdzenZLc2FIX1NEckNNVjM4cER5WXhxZ0dhcGZPNzN2YUxQd0FSWDBDMVg4RzRicURKOS1ONG0tSEY1MjhmcXBkNHo5VzBCbm9DZXM4dEFKOTVTMDBDcjd3QU84RU9tb2J3cXBWMXc5UmNrLWVveGRBcFhaWGdpODRXY1RzMGN4bjNsazNha3cydERoVXp0cno4YVZOQVR3Vmdn?oc=5", "source": "India Today", "published_at": "Sat, 15 Aug 2026 06:31:57 GMT"}], "status": "active", "title": "4 killed, 5 Armymen missing as heavy rain in Arunachal triggers landslide, floods - India Today", "url": "https://news.google.com/rss/articles/CBMi5AFBVV95cUxPeEdXUGZRTDE2YkdXREtXQVBkdnJlTmZ6ZktRanV6eVE5Yldya0Itd1FBNUJ0Tmh1YU9RVnJSeDNjSTR1X2s5YlVKcV9EQU1NbUREZ3dDbDJKZUdfOUVXTm1YbXR2YUhVLXZ4R2dxUW02RmQ4OUZ1MzdSbGoxUEQzNzdMUzlWbEhpVl9xMVpYNWtPbEFTT2doYWpuZE9MRkdYN0w4aUVnVG42ZEdEbW9PZ0xoWlFVbDN3UEVHbHlZQkFEZmh3QlI5ZFNlX0d1emFFWHNseVlIZ1AyQnc4ekFmUE5PQXLSAeoBQVVfeXFMUExuck5BMFBfYVFRb1ZqQTV3Nm5Md1FMMkZkTFFwdzFKUXNqT0VUZmNFTHpYT2VRVUJXNjViSTRFQ0NLX19XYTVScm91bXlwZVdzenZLc2FIX1NEckNNVjM4cER5WXhxZ0dhcGZPNzN2YUxQd0FSWDBDMVg4RzRicURKOS1ONG0tSEY1MjhmcXBkNHo5VzBCbm9DZXM4dEFKOTVTMDBDcjd3QU84RU9tb2J3cXBWMXc5UmNrLWVveGRBcFhaWGdpODRXY1RzMGN4bjNsazNha3cydERoVXp0cno4YVZOQVR3Vmdn?oc=5"}, {"event_id": "DISHA-FLOOD-UTTARAKHAN_CHAMOLI-20260814-7932", "article_id": "5eb9c270d15ee3b59626913c415e3a19dd64686c4ee549e2d2cf9cb93f5df21b", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["The New Indian Express"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMixwFBVV95cUxPUWIydWhTZWZmMkdycktzT0dEYVBEYnVxN1BXdkJTT0VYSmpsdVVTWGRxUlRRR3oxa1JhZVY0TVFNUm9PdnhVYjdxc0owaGlETDV1RjlrVDJXTm5TVHhlU05XeVktWDZTMG94MlM3Q0M0OGtHTl9tYy1RT1gwRTVvTDhOa1NPWEROSVNtcFNHdUZGNkZMUTBYM3FQc0x0ZU11bFV0MHVHM2NKUU12RU5SNGlzVHBQeFZnNjVkWnA1RmwtTGJnbTc40gHUAUFVX3lxTE1pTzJJeDNpdTBhTXJoaXdzcFJ2REhtODVkVjBLdV9pNDg2UXNwUTMzTmdFMDFwcjEyekFuMF9sNzN0TUt5bTZUT1hZb2puX3VIT3U1SWs3ZjRyc294M29meUZjMTBST1RLZjhxUk82WFdzalRrTV84emp2RXFMMHRScnI2cmNYbFYtb2RwanFUX3Y5bDFuZWJwNGRsYWxqTUZkOFpubms5bkMzN0EzaTViTHlZZVZ1dFFXUWhObGFkQjQxdTBuLXZMOXNVeGstdmxVTHBF?oc=5\" target=\"_blank\">Seven workers dead, three still trapped after water floods tunnel in Uttarakhand\u2019s Chamoli</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">The New Indian Express</font>", "disaster_type": "flood", "evidence": ["Seven workers dead, three still trapped", "water floods tunnel in Uttarakhand\u2019s Chamoli"], "first_seen_at": "2026-08-18T19:09:59.160131+00:00", "incident_date": "2026-08-14", "last_updated_at": "2026-08-18T19:09:59.160131+00:00", "location": {"country": "India", "state": "Uttarakhand", "district": "Chamoli", "city": null, "latitude": 30.4, "longitude": 79.3333, "precision": "district"}, "processed_at": "2026-08-18T19:09:59.160131+00:00", "published_at": "Fri, 14 Aug 2026 05:20:53 GMT", "reason": "Water flooded a tunnel in Chamoli, Uttarakhand, resulting in seven fatalities and trapping three workers.", "severity": "high", "source": "The New Indian Express", "source_articles": [{"article_id": "5eb9c270d15ee3b59626913c415e3a19dd64686c4ee549e2d2cf9cb93f5df21b", "title": "Seven workers dead, three still trapped after water floods tunnel in Uttarakhand\u2019s Chamoli - The New Indian Express", "url": "https://news.google.com/rss/articles/CBMixwFBVV95cUxPUWIydWhTZWZmMkdycktzT0dEYVBEYnVxN1BXdkJTT0VYSmpsdVVTWGRxUlRRR3oxa1JhZVY0TVFNUm9PdnhVYjdxc0owaGlETDV1RjlrVDJXTm5TVHhlU05XeVktWDZTMG94MlM3Q0M0OGtHTl9tYy1RT1gwRTVvTDhOa1NPWEROSVNtcFNHdUZGNkZMUTBYM3FQc0x0ZU11bFV0MHVHM2NKUU12RU5SNGlzVHBQeFZnNjVkWnA1RmwtTGJnbTc40gHUAUFVX3lxTE1pTzJJeDNpdTBhTXJoaXdzcFJ2REhtODVkVjBLdV9pNDg2UXNwUTMzTmdFMDFwcjEyekFuMF9sNzN0TUt5bTZUT1hZb2puX3VIT3U1SWs3ZjRyc294M29meUZjMTBST1RLZjhxUk82WFdzalRrTV84emp2RXFMMHRScnI2cmNYbFYtb2RwanFUX3Y5bDFuZWJwNGRsYWxqTUZkOFpubms5bkMzN0EzaTViTHlZZVZ1dFFXUWhObGFkQjQxdTBuLXZMOXNVeGstdmxVTHBF?oc=5", "source": "The New Indian Express", "published_at": "Fri, 14 Aug 2026 05:20:53 GMT"}], "status": "active", "title": "Seven workers dead, three still trapped after water floods tunnel in Uttarakhand\u2019s Chamoli - The New Indian Express", "url": "https://news.google.com/rss/articles/CBMixwFBVV95cUxPUWIydWhTZWZmMkdycktzT0dEYVBEYnVxN1BXdkJTT0VYSmpsdVVTWGRxUlRRR3oxa1JhZVY0TVFNUm9PdnhVYjdxc0owaGlETDV1RjlrVDJXTm5TVHhlU05XeVktWDZTMG94MlM3Q0M0OGtHTl9tYy1RT1gwRTVvTDhOa1NPWEROSVNtcFNHdUZGNkZMUTBYM3FQc0x0ZU11bFV0MHVHM2NKUU12RU5SNGlzVHBQeFZnNjVkWnA1RmwtTGJnbTc40gHUAUFVX3lxTE1pTzJJeDNpdTBhTXJoaXdzcFJ2REhtODVkVjBLdV9pNDg2UXNwUTMzTmdFMDFwcjEyekFuMF9sNzN0TUt5bTZUT1hZb2puX3VIT3U1SWs3ZjRyc294M29meUZjMTBST1RLZjhxUk82WFdzalRrTV84emp2RXFMMHRScnI2cmNYbFYtb2RwanFUX3Y5bDFuZWJwNGRsYWxqTUZkOFpubms5bkMzN0EzaTViTHlZZVZ1dFFXUWhObGFkQjQxdTBuLXZMOXNVeGstdmxVTHBF?oc=5"}, {"event_id": "DISHA-LANDSLIDE-UTTARAKHAN-20260814-E7EA", "article_id": "d22f343e429880cda10638e7ace4176f2cdff2802229d7eb74d309a4511b274e", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["Kashmir Life"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMiqAFBVV95cUxNNVZaLUY2dVZaWVo3ZUN3UWZLcEh3NUlBeWE4QnBiSGV3MmFaZ1VjMDUxd2NPSWJMVWJCbExZUFgwdk80b2FqRDdwLVIwV1JTRDhaWU1ZWk5VMmY5Rnc1NEM4c3llU1BBMXd0a1RFRUs1UEgtd1d1OXRCVVowbFR3UmFGZ3pyYWZTLTRsVkw1WXdUT3g4T0ZzYTlNOTltaE9BcFoxMjVfdzY?oc=5\" target=\"_blank\">Seven Killed, 14 Injured After Landslide at Uttarakhand Hydropower Project</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">Kashmir Life</font>", "disaster_type": "landslide", "evidence": ["Seven Killed, 14 Injured", "Landslide at Uttarakhand Hydropower Project"], "first_seen_at": "2026-08-18T19:09:59.240912+00:00", "incident_date": "2026-08-14", "last_updated_at": "2026-08-18T19:09:59.240912+00:00", "location": {"country": "India", "state": "Uttarakhand", "district": null, "city": null, "latitude": 30.0668, "longitude": 79.0193, "precision": "state"}, "processed_at": "2026-08-18T19:09:59.240912+00:00", "published_at": "Fri, 14 Aug 2026 05:00:14 GMT", "reason": "A landslide at a hydropower project in Uttarakhand killed seven people and injured 14.", "severity": "high", "source": "Kashmir Life", "source_articles": [{"article_id": "d22f343e429880cda10638e7ace4176f2cdff2802229d7eb74d309a4511b274e", "title": "Seven Killed, 14 Injured After Landslide at Uttarakhand Hydropower Project - Kashmir Life", "url": "https://news.google.com/rss/articles/CBMiqAFBVV95cUxNNVZaLUY2dVZaWVo3ZUN3UWZLcEh3NUlBeWE4QnBiSGV3MmFaZ1VjMDUxd2NPSWJMVWJCbExZUFgwdk80b2FqRDdwLVIwV1JTRDhaWU1ZWk5VMmY5Rnc1NEM4c3llU1BBMXd0a1RFRUs1UEgtd1d1OXRCVVowbFR3UmFGZ3pyYWZTLTRsVkw1WXdUT3g4T0ZzYTlNOTltaE9BcFoxMjVfdzY?oc=5", "source": "Kashmir Life", "published_at": "Fri, 14 Aug 2026 05:00:14 GMT"}], "status": "active", "title": "Seven Killed, 14 Injured After Landslide at Uttarakhand Hydropower Project - Kashmir Life", "url": "https://news.google.com/rss/articles/CBMiqAFBVV95cUxNNVZaLUY2dVZaWVo3ZUN3UWZLcEh3NUlBeWE4QnBiSGV3MmFaZ1VjMDUxd2NPSWJMVWJCbExZUFgwdk80b2FqRDdwLVIwV1JTRDhaWU1ZWk5VMmY5Rnc1NEM4c3llU1BBMXd0a1RFRUs1UEgtd1d1OXRCVVowbFR3UmFGZ3pyYWZTLTRsVkw1WXdUT3g4T0ZzYTlNOTltaE9BcFoxMjVfdzY?oc=5"}, {"event_id": "DISHA-FLOOD-ASSAM-20260818-F3A8", "article_id": "44d5d36a7e276762b872c18f0722b664a2cb871b060bf4dbcc6d395047701c3f", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "ONGOING_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["India Today NE"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMivwFBVV95cUxNQ1FnbUMtUE1fcmVXOUZqejZTREs1Qm9MQ05GR2p5ZGhmR05GdEJCc2J5YzB1Tk1JS21UM25lRkNRN2dzV0M1S25kZUJJUWtoZlYtaXhDemlraDAtNERzNUJHMG94MVU0dHo3ekF1SGd1Ym5vcmItOFNyaGpQMTZ6QWhJUmt1MGhZa1JUX2JLZ3JFV2V3ZWpxU1lzTVBicVdNX3NZQnF3LXlBZHowUmdYcDc0UW10dW9oQWp1VUlRTdIBxAFBVV95cUxOQzRoMkQ4UTBDNHpDUE9pVjlVZUhPNGszTVY1eVIyRTNma2Y0RjhkNlFpZkZYMjVkQkpOQ2dVX010VTAwTTZLUGo1Ri0xRDI5eUZmWm9PUFo0YmM3dm1EWnY2NldJTmtBTzl2QkREVlROdF8tRXJzS0o0TXJJWDlkMkZwUTFmNVV2ZGV4UExPUmhQdTBDdjdaT1VBVkhJTnNUcXRIeldVY3h1X0ZrWGFmSjhQQ0ZqUTVOVlNjazNCTElzZk4w?oc=5\" target=\"_blank\">Assam flood death toll rises to 105, nearly 32,000 still affected</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">India Today NE</font>", "disaster_type": "flood", "evidence": ["Assam flood death toll rises to 105", "nearly 32,000 still affected"], "first_seen_at": "2026-08-18T19:09:59.348813+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:09:59.348813+00:00", "location": {"country": "India", "state": "Assam", "district": null, "city": null, "latitude": 26.2006, "longitude": 92.9376, "precision": "state"}, "processed_at": "2026-08-18T19:09:59.348813+00:00", "published_at": "Tue, 18 Aug 2026 16:29:38 GMT", "reason": "Floods in Assam have claimed 105 lives and left nearly 32,000 people affected.", "severity": "critical", "source": "India Today NE", "source_articles": [{"article_id": "44d5d36a7e276762b872c18f0722b664a2cb871b060bf4dbcc6d395047701c3f", "title": "Assam flood death toll rises to 105, nearly 32,000 still affected - India Today NE", "url": "https://news.google.com/rss/articles/CBMivwFBVV95cUxNQ1FnbUMtUE1fcmVXOUZqejZTREs1Qm9MQ05GR2p5ZGhmR05GdEJCc2J5YzB1Tk1JS21UM25lRkNRN2dzV0M1S25kZUJJUWtoZlYtaXhDemlraDAtNERzNUJHMG94MVU0dHo3ekF1SGd1Ym5vcmItOFNyaGpQMTZ6QWhJUmt1MGhZa1JUX2JLZ3JFV2V3ZWpxU1lzTVBicVdNX3NZQnF3LXlBZHowUmdYcDc0UW10dW9oQWp1VUlRTdIBxAFBVV95cUxOQzRoMkQ4UTBDNHpDUE9pVjlVZUhPNGszTVY1eVIyRTNma2Y0RjhkNlFpZkZYMjVkQkpOQ2dVX010VTAwTTZLUGo1Ri0xRDI5eUZmWm9PUFo0YmM3dm1EWnY2NldJTmtBTzl2QkREVlROdF8tRXJzS0o0TXJJWDlkMkZwUTFmNVV2ZGV4UExPUmhQdTBDdjdaT1VBVkhJTnNUcXRIeldVY3h1X0ZrWGFmSjhQQ0ZqUTVOVlNjazNCTElzZk4w?oc=5", "source": "India Today NE", "published_at": "Tue, 18 Aug 2026 16:29:38 GMT"}], "status": "active", "title": "Assam flood death toll rises to 105, nearly 32,000 still affected - India Today NE", "url": "https://news.google.com/rss/articles/CBMivwFBVV95cUxNQ1FnbUMtUE1fcmVXOUZqejZTREs1Qm9MQ05GR2p5ZGhmR05GdEJCc2J5YzB1Tk1JS21UM25lRkNRN2dzV0M1S25kZUJJUWtoZlYtaXhDemlraDAtNERzNUJHMG94MVU0dHo3ekF1SGd1Ym5vcmItOFNyaGpQMTZ6QWhJUmt1MGhZa1JUX2JLZ3JFV2V3ZWpxU1lzTVBicVdNX3NZQnF3LXlBZHowUmdYcDc0UW10dW9oQWp1VUlRTdIBxAFBVV95cUxOQzRoMkQ4UTBDNHpDUE9pVjlVZUhPNGszTVY1eVIyRTNma2Y0RjhkNlFpZkZYMjVkQkpOQ2dVX010VTAwTTZLUGo1Ri0xRDI5eUZmWm9PUFo0YmM3dm1EWnY2NldJTmtBTzl2QkREVlROdF8tRXJzS0o0TXJJWDlkMkZwUTFmNVV2ZGV4UExPUmhQdTBDdjdaT1VBVkhJTnNUcXRIeldVY3h1X0ZrWGFmSjhQQ0ZqUTVOVlNjazNCTElzZk4w?oc=5"}, {"event_id": "DISHA-INDUSTRIAL_ACCIDENT-MAHARASHTR_MAHAD-20260817-D4C6", "article_id": "d23c874fe10b14bf453a8199ee998cb4c0bc02e68430c70634a6d116ea237f0f", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["India Today"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi0AFBVV95cUxOc05YMEJEVWhON09BR3dBc05nWnR0akVEN0pacm56Qm1WTndCSkNjZ0NWd0ZZMzNEVTI2OEFxa2NtbkRCbGRpRkZDRTFkSERtSU5lWU1PWURZSl9VUWc1UmRsVlIxUVF1LTlTV04yYjlCbEY1aXRBSHhaVnNoMF9Obm1sTWttaFZScDQ0TVltVEFyZTZaeXJhN2xGUXVVbVVTZzVoSXRPcUVlRmFTZkNTTG9Fb25jUlQzNUN2SmRQNGxreV9xMDlaZHpybmR6dDBm0gHQAUFVX3lxTE5zTlgwQkRVaE43T0FHd0FzTmdadHRqRUQ3SlpybnpCbVZOd0JKQ2NnQ1Z3RlkzM0RVMjY4QXFrY21uREJsZGlGRkNFMWRIRG1JTmVZTU9ZRFlKX1VRZzVSZGxWUjFRUXUtOVNXTjJiOUJsRjVpdEFIeFpWc2gwX05ubWxNa21oVlJwNDRNWW1UQXJlNlp5cmE3bEZRdVVtVVNnNWhJdE9xRWVGYVNmQ1NMb0VvbmNSVDM1Q3ZKZFA0bGt5X3EwOVpkenJuZHp0MGY?oc=5\" target=\"_blank\">2 dead after gas leak at chemical factory in Maharashtra's Mahad</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">India Today</font>", "disaster_type": "industrial_accident", "evidence": ["2 dead after gas leak", "chemical factory in Maharashtra's Mahad"], "first_seen_at": "2026-08-18T19:09:59.577708+00:00", "incident_date": "2026-08-17", "last_updated_at": "2026-08-18T19:09:59.577708+00:00", "location": {"country": "India", "state": "Maharashtra", "district": null, "city": "Mahad", "latitude": 19.7515, "longitude": 75.7139, "precision": "state"}, "processed_at": "2026-08-18T19:09:59.577708+00:00", "published_at": "Mon, 17 Aug 2026 09:56:53 GMT", "reason": "A chemical factory gas leak in Mahad, Maharashtra resulted in two fatalities.", "severity": "high", "source": "India Today", "source_articles": [{"article_id": "d23c874fe10b14bf453a8199ee998cb4c0bc02e68430c70634a6d116ea237f0f", "title": "2 dead after gas leak at chemical factory in Maharashtra's Mahad - India Today", "url": "https://news.google.com/rss/articles/CBMi0AFBVV95cUxOc05YMEJEVWhON09BR3dBc05nWnR0akVEN0pacm56Qm1WTndCSkNjZ0NWd0ZZMzNEVTI2OEFxa2NtbkRCbGRpRkZDRTFkSERtSU5lWU1PWURZSl9VUWc1UmRsVlIxUVF1LTlTV04yYjlCbEY1aXRBSHhaVnNoMF9Obm1sTWttaFZScDQ0TVltVEFyZTZaeXJhN2xGUXVVbVVTZzVoSXRPcUVlRmFTZkNTTG9Fb25jUlQzNUN2SmRQNGxreV9xMDlaZHpybmR6dDBm0gHQAUFVX3lxTE5zTlgwQkRVaE43T0FHd0FzTmdadHRqRUQ3SlpybnpCbVZOd0JKQ2NnQ1Z3RlkzM0RVMjY4QXFrY21uREJsZGlGRkNFMWRIRG1JTmVZTU9ZRFlKX1VRZzVSZGxWUjFRUXUtOVNXTjJiOUJsRjVpdEFIeFpWc2gwX05ubWxNa21oVlJwNDRNWW1UQXJlNlp5cmE3bEZRdVVtVVNnNWhJdE9xRWVGYVNmQ1NMb0VvbmNSVDM1Q3ZKZFA0bGt5X3EwOVpkenJuZHp0MGY?oc=5", "source": "India Today", "published_at": "Mon, 17 Aug 2026 09:56:53 GMT"}], "status": "active", "title": "2 dead after gas leak at chemical factory in Maharashtra's Mahad - India Today", "url": "https://news.google.com/rss/articles/CBMi0AFBVV95cUxOc05YMEJEVWhON09BR3dBc05nWnR0akVEN0pacm56Qm1WTndCSkNjZ0NWd0ZZMzNEVTI2OEFxa2NtbkRCbGRpRkZDRTFkSERtSU5lWU1PWURZSl9VUWc1UmRsVlIxUVF1LTlTV04yYjlCbEY1aXRBSHhaVnNoMF9Obm1sTWttaFZScDQ0TVltVEFyZTZaeXJhN2xGUXVVbVVTZzVoSXRPcUVlRmFTZkNTTG9Fb25jUlQzNUN2SmRQNGxreV9xMDlaZHpybmR6dDBm0gHQAUFVX3lxTE5zTlgwQkRVaE43T0FHd0FzTmdadHRqRUQ3SlpybnpCbVZOd0JKQ2NnQ1Z3RlkzM0RVMjY4QXFrY21uREJsZGlGRkNFMWRIRG1JTmVZTU9ZRFlKX1VRZzVSZGxWUjFRUXUtOVNXTjJiOUJsRjVpdEFIeFpWc2gwX05ubWxNa21oVlJwNDRNWW1UQXJlNlp5cmE3bEZRdVVtVVNnNWhJdE9xRWVGYVNmQ1NMb0VvbmNSVDM1Q3ZKZFA0bGt5X3EwOVpkenJuZHp0MGY?oc=5"}, {"event_id": "DISHA-FLOOD-ODISHA-20260818-0784", "article_id": "bb9f2f1d031f998bf7808011674bf314f3763dd4402b951a6e7c0bd5bfbb6f37", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["curlytales.com"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMizAFBVV95cUxNU1FhcGc1SzduSmQ3X0VFQWpaMDF0ZkxFVDhtQXR2dVlPamlZcHNDb0o0c21fVVpXSktYV1lqZnYxZ3lkT0Q0dW9TVmV3LUVUc2M3eTcxZjZ5bU8ya1FUckF1a0JSR05FbnpLVmpUOUhzWTNPbUJDY0FOY2RsejNZLWNMYU1mR0JMZXhLN2hUNktUZ0p5amp2VVJxVUd6VTI5ZEZ6ODdzUnhzeWZvQldtM2ZwXzRhd0VXRHVmN3ZUTEh2QjhENnNJNGNTTnLSAdIBQVVfeXFMTlFoN0NjREpaY1R4TldNQ21iZEp3ZVItc3VzQ0FzNGlqNDhpTmVwVmtYZnVReHNmZENEMjA5Tl9QMW9wb0Nob2ppTnNQZDFyVWo4WVpvSldNcmZUT0syVkV3SHlBckRlN2FmeUpZYklrMDNRaGtfUkpERVdJT0dGVzlvQjRSTVlpcHU1bXBSRUFvMUNGMDlZNFdyZWVMQ3lfSW10Z005NnYwUkVqUll3dThIYzFCSFlpdDRPaTdCdW00cWJRWTBQOVFhSm9yM2U5R19B?oc=5\" target=\"_blank\">Odisha Floods: 13 Dead, 9.4 Lakh Affected, Schools Shut; CM Announces \u20b91,000 Crore Relief Package</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">curlytales.com</font>", "disaster_type": "flood", "evidence": ["Odisha Floods: 13 Dead, 9.4 Lakh Affected", "CM Announces \u20b91,000 Crore Relief Package"], "first_seen_at": "2026-08-18T19:09:59.701645+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:09:59.701645+00:00", "location": {"country": "India", "state": "Odisha", "district": null, "city": null, "latitude": 20.9517, "longitude": 85.0985, "precision": "state"}, "processed_at": "2026-08-18T19:09:59.701645+00:00", "published_at": "Tue, 18 Aug 2026 13:32:18 GMT", "reason": "Severe floods in Odisha killed 13 people and affected over 9.4 lakh residents.", "severity": "critical", "source": "curlytales.com", "source_articles": [{"article_id": "bb9f2f1d031f998bf7808011674bf314f3763dd4402b951a6e7c0bd5bfbb6f37", "title": "Odisha Floods: 13 Dead, 9.4 Lakh Affected, Schools Shut; CM Announces \u20b91,000 Crore Relief Package - curlytales.com", "url": "https://news.google.com/rss/articles/CBMizAFBVV95cUxNU1FhcGc1SzduSmQ3X0VFQWpaMDF0ZkxFVDhtQXR2dVlPamlZcHNDb0o0c21fVVpXSktYV1lqZnYxZ3lkT0Q0dW9TVmV3LUVUc2M3eTcxZjZ5bU8ya1FUckF1a0JSR05FbnpLVmpUOUhzWTNPbUJDY0FOY2RsejNZLWNMYU1mR0JMZXhLN2hUNktUZ0p5amp2VVJxVUd6VTI5ZEZ6ODdzUnhzeWZvQldtM2ZwXzRhd0VXRHVmN3ZUTEh2QjhENnNJNGNTTnLSAdIBQVVfeXFMTlFoN0NjREpaY1R4TldNQ21iZEp3ZVItc3VzQ0FzNGlqNDhpTmVwVmtYZnVReHNmZENEMjA5Tl9QMW9wb0Nob2ppTnNQZDFyVWo4WVpvSldNcmZUT0syVkV3SHlBckRlN2FmeUpZYklrMDNRaGtfUkpERVdJT0dGVzlvQjRSTVlpcHU1bXBSRUFvMUNGMDlZNFdyZWVMQ3lfSW10Z005NnYwUkVqUll3dThIYzFCSFlpdDRPaTdCdW00cWJRWTBQOVFhSm9yM2U5R19B?oc=5", "source": "curlytales.com", "published_at": "Tue, 18 Aug 2026 13:32:18 GMT"}], "status": "active", "title": "Odisha Floods: 13 Dead, 9.4 Lakh Affected, Schools Shut; CM Announces \u20b91,000 Crore Relief Package - curlytales.com", "url": "https://news.google.com/rss/articles/CBMizAFBVV95cUxNU1FhcGc1SzduSmQ3X0VFQWpaMDF0ZkxFVDhtQXR2dVlPamlZcHNDb0o0c21fVVpXSktYV1lqZnYxZ3lkT0Q0dW9TVmV3LUVUc2M3eTcxZjZ5bU8ya1FUckF1a0JSR05FbnpLVmpUOUhzWTNPbUJDY0FOY2RsejNZLWNMYU1mR0JMZXhLN2hUNktUZ0p5amp2VVJxVUd6VTI5ZEZ6ODdzUnhzeWZvQldtM2ZwXzRhd0VXRHVmN3ZUTEh2QjhENnNJNGNTTnLSAdIBQVVfeXFMTlFoN0NjREpaY1R4TldNQ21iZEp3ZVItc3VzQ0FzNGlqNDhpTmVwVmtYZnVReHNmZENEMjA5Tl9QMW9wb0Nob2ppTnNQZDFyVWo4WVpvSldNcmZUT0syVkV3SHlBckRlN2FmeUpZYklrMDNRaGtfUkpERVdJT0dGVzlvQjRSTVlpcHU1bXBSRUFvMUNGMDlZNFdyZWVMQ3lfSW10Z005NnYwUkVqUll3dThIYzFCSFlpdDRPaTdCdW00cWJRWTBQOVFhSm9yM2U5R19B?oc=5"}, {"event_id": "DISHA-FLOOD-WEST_BENGA_PASCHIM_ME-20260818-0AF2", "article_id": "15ae7eec58a64d330fffb18b779f0ca8ec2445e346999fb3e9a2e2b718628e72", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["The Statesman"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi0wFBVV95cUxNaklNWEdRcU12cGZWLUlLV1h3VkpWc0ZtVF83dDJkcl9KTWo5SEdsZE1OSnZmWEFKMjd3OTZLSGJtdlhnNlB1aHh2Vm1qNVg4UG1lMXpnOW55UDNaY1NvVHhPXzRDUlhKVXFUYUpVWW1yWFhXVDhGQVdlWW9HSzF1OUlKbDQ0YlBhODVaNzJaVXZMUnRjejZJa0k2d1dXaEd3cjRsSVA0VGpNa0lqVkwxM0VvVkJxRDZVZHh0WDBIWnZETFlESDVJYkRmMkZZOExma3k40gHYAUFVX3lxTE1hekFKVlZwRmx1MVJQVHpwcmpONDF3WWFhUzZraWVGZ2I1MWZYZk9FUkNxc2piNkhFMWlkSjQtcFBGbC1FSi1NWjZJbE5ZQ1RNcnM3UVdfcVVOLWlJRktaeGN5WWFLbHlscEZnRWpSTTFiYlpxVXZxSnNlbk5yS2VyV0phVXZ1THhvQjhOUUpBdWx4bTJvcHhlU2VKUER6TGZJekhHbHEyemtLU2V5dTgxcGFKcnNzOXUwVEVOZGpzeXB4b3NYb01UWE12aE1xWkhfUmZRdEpYbQ?oc=5\" target=\"_blank\">Flood fury grips two Midnapore districts in Bengal as thousands flee, two dead</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">The Statesman</font>", "disaster_type": "flood", "evidence": ["Flood fury grips two Midnapore districts in Bengal", "thousands flee, two dead"], "first_seen_at": "2026-08-18T19:10:00.038158+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:00.038158+00:00", "location": {"country": "India", "state": "West Bengal", "district": "Paschim Medinipur", "city": null, "latitude": 22.9868, "longitude": 87.855, "precision": "state"}, "processed_at": "2026-08-18T19:10:00.038158+00:00", "published_at": "Tue, 18 Aug 2026 11:37:00 GMT", "reason": "Flooding in Midnapore districts of West Bengal killed two people and forced thousands to evacuate.", "severity": "high", "source": "The Statesman", "source_articles": [{"article_id": "15ae7eec58a64d330fffb18b779f0ca8ec2445e346999fb3e9a2e2b718628e72", "title": "Flood fury grips two Midnapore districts in Bengal as thousands flee, two dead - The Statesman", "url": "https://news.google.com/rss/articles/CBMi0wFBVV95cUxNaklNWEdRcU12cGZWLUlLV1h3VkpWc0ZtVF83dDJkcl9KTWo5SEdsZE1OSnZmWEFKMjd3OTZLSGJtdlhnNlB1aHh2Vm1qNVg4UG1lMXpnOW55UDNaY1NvVHhPXzRDUlhKVXFUYUpVWW1yWFhXVDhGQVdlWW9HSzF1OUlKbDQ0YlBhODVaNzJaVXZMUnRjejZJa0k2d1dXaEd3cjRsSVA0VGpNa0lqVkwxM0VvVkJxRDZVZHh0WDBIWnZETFlESDVJYkRmMkZZOExma3k40gHYAUFVX3lxTE1hekFKVlZwRmx1MVJQVHpwcmpONDF3WWFhUzZraWVGZ2I1MWZYZk9FUkNxc2piNkhFMWlkSjQtcFBGbC1FSi1NWjZJbE5ZQ1RNcnM3UVdfcVVOLWlJRktaeGN5WWFLbHlscEZnRWpSTTFiYlpxVXZxSnNlbk5yS2VyV0phVXZ1THhvQjhOUUpBdWx4bTJvcHhlU2VKUER6TGZJekhHbHEyemtLU2V5dTgxcGFKcnNzOXUwVEVOZGpzeXB4b3NYb01UWE12aE1xWkhfUmZRdEpYbQ?oc=5", "source": "The Statesman", "published_at": "Tue, 18 Aug 2026 11:37:00 GMT"}], "status": "active", "title": "Flood fury grips two Midnapore districts in Bengal as thousands flee, two dead - The Statesman", "url": "https://news.google.com/rss/articles/CBMi0wFBVV95cUxNaklNWEdRcU12cGZWLUlLV1h3VkpWc0ZtVF83dDJkcl9KTWo5SEdsZE1OSnZmWEFKMjd3OTZLSGJtdlhnNlB1aHh2Vm1qNVg4UG1lMXpnOW55UDNaY1NvVHhPXzRDUlhKVXFUYUpVWW1yWFhXVDhGQVdlWW9HSzF1OUlKbDQ0YlBhODVaNzJaVXZMUnRjejZJa0k2d1dXaEd3cjRsSVA0VGpNa0lqVkwxM0VvVkJxRDZVZHh0WDBIWnZETFlESDVJYkRmMkZZOExma3k40gHYAUFVX3lxTE1hekFKVlZwRmx1MVJQVHpwcmpONDF3WWFhUzZraWVGZ2I1MWZYZk9FUkNxc2piNkhFMWlkSjQtcFBGbC1FSi1NWjZJbE5ZQ1RNcnM3UVdfcVVOLWlJRktaeGN5WWFLbHlscEZnRWpSTTFiYlpxVXZxSnNlbk5yS2VyV0phVXZ1THhvQjhOUUpBdWx4bTJvcHhlU2VKUER6TGZJekhHbHEyemtLU2V5dTgxcGFKcnNzOXUwVEVOZGpzeXB4b3NYb01UWE12aE1xWkhfUmZRdEpYbQ?oc=5"}, {"event_id": "DISHA-FIRE_ACCIDENT-INDIA-20260818-63E6", "article_id": "86fcd30b6083c91b90805e5466f3e0eae9b820db23be5f2ec1cb8c1b59eb939f", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["Interior Daily"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMiqgFBVV95cUxNLXRWS01ibWNHa28tdFpCT2s0YlBPREtqREtndkgybGhDclNJVmJxd0ZTOGtPeFFZVWNlOHVGSE5VdWNxQ1pwQVhjNkxZX0dzdXZJVTZLSi1aNjBYcnJ4Rlo1VVkwZWVMaWFQZU1od2MzT2tYY0x5RGxwM1NhTUJvcTNCMi1LT05IR21aR3YtYzdXOG9IakQxUjRFbkZ1SXFFT29YUTFET1htQQ?oc=5\" target=\"_blank\">One dead after fire breaks out at furniture market in India</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">Interior Daily</font>", "disaster_type": "fire_accident", "evidence": ["One dead after fire breaks out", "furniture market in India"], "first_seen_at": "2026-08-18T19:10:00.075954+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:00.075954+00:00", "location": {"country": "India", "state": null, "district": null, "city": null, "latitude": 20.5937, "longitude": 78.9629, "precision": "country"}, "processed_at": "2026-08-18T19:10:00.075954+00:00", "published_at": "Tue, 18 Aug 2026 09:16:48 GMT", "reason": "A fire at a furniture market in India caused one fatality.", "severity": "high", "source": "Interior Daily", "source_articles": [{"article_id": "86fcd30b6083c91b90805e5466f3e0eae9b820db23be5f2ec1cb8c1b59eb939f", "title": "One dead after fire breaks out at furniture market in India - Interior Daily", "url": "https://news.google.com/rss/articles/CBMiqgFBVV95cUxNLXRWS01ibWNHa28tdFpCT2s0YlBPREtqREtndkgybGhDclNJVmJxd0ZTOGtPeFFZVWNlOHVGSE5VdWNxQ1pwQVhjNkxZX0dzdXZJVTZLSi1aNjBYcnJ4Rlo1VVkwZWVMaWFQZU1od2MzT2tYY0x5RGxwM1NhTUJvcTNCMi1LT05IR21aR3YtYzdXOG9IakQxUjRFbkZ1SXFFT29YUTFET1htQQ?oc=5", "source": "Interior Daily", "published_at": "Tue, 18 Aug 2026 09:16:48 GMT"}], "status": "active", "title": "One dead after fire breaks out at furniture market in India - Interior Daily", "url": "https://news.google.com/rss/articles/CBMiqgFBVV95cUxNLXRWS01ibWNHa28tdFpCT2s0YlBPREtqREtndkgybGhDclNJVmJxd0ZTOGtPeFFZVWNlOHVGSE5VdWNxQ1pwQVhjNkxZX0dzdXZJVTZLSi1aNjBYcnJ4Rlo1VVkwZWVMaWFQZU1od2MzT2tYY0x5RGxwM1NhTUJvcTNCMi1LT05IR21aR3YtYzdXOG9IakQxUjRFbkZ1SXFFT29YUTFET1htQQ?oc=5"}, {"event_id": "DISHA-BUILDING_COLLAPSE-UTTARAKHAN-20260816-8815", "article_id": "dbfbd1301e65c9da0a18cc0498352ee4739cd2b77ccf767cbd72f19e6c7d013c", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "ONGOING_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["The Indian Express"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMipgFBVV95cUxOSEM4dFFiWWl2TWlpVzM3MkFtOFItb3duQXBqX3Y4dU1MZE14MENDd3lLcVhmOFVEaFdWb2ZrZlhVMVNwSFBHSHdFek1nWk1zT2NBLTdVRDhKWlJPT01wX09VaWF5ZjVfSWZMRFNHRGppMzJCU2FtX3FYaE5yWDV3Ti1YeTBDaXFOWG1vUVdsdnRQa3E0Y2R4OERDRGc2dEpMdWd4V2tB0gGsAUFVX3lxTE5jSENLYkh4bmkzdEdRanJIZC0zRDU2T1JsSElBLVdsYVN0TEVoZnRKNHdrdjdLNWt0RzNEYWE1dE1PN2dUOWMzeGdPSjlQTm9rTXpSRU5rZS1VUG1oUmo3eFY2VzZaMFgtVE1pNkRLOW56N1pPc2ZhY2ZoUW9CWXpJT3hHU1NaNVNId0dEbF9qWGc0X0VmNWpNX0p2ekxRRXNwb3oyRFVtbUMtT00?oc=5\" target=\"_blank\">Blue drums, unlikely rescue rafts: How rescuers hunt for trapped Uttarakhand workers</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">The Indian Express</font>", "disaster_type": "building_collapse", "evidence": ["How rescuers hunt for trapped Uttarakhand workers", "Blue drums, unlikely rescue rafts"], "first_seen_at": "2026-08-18T19:10:00.183573+00:00", "incident_date": "2026-08-16", "last_updated_at": "2026-08-18T19:10:00.183573+00:00", "location": {"country": "India", "state": "Uttarakhand", "district": null, "city": null, "latitude": 30.0668, "longitude": 79.0193, "precision": "state"}, "processed_at": "2026-08-18T19:10:00.183573+00:00", "published_at": "Sun, 16 Aug 2026 05:45:00 GMT", "reason": "Rescuers are conducting active search and rescue operations for workers trapped in Uttarakhand.", "severity": "high", "source": "The Indian Express", "source_articles": [{"article_id": "dbfbd1301e65c9da0a18cc0498352ee4739cd2b77ccf767cbd72f19e6c7d013c", "title": "Blue drums, unlikely rescue rafts: How rescuers hunt for trapped Uttarakhand workers - The Indian Express", "url": "https://news.google.com/rss/articles/CBMipgFBVV95cUxOSEM4dFFiWWl2TWlpVzM3MkFtOFItb3duQXBqX3Y4dU1MZE14MENDd3lLcVhmOFVEaFdWb2ZrZlhVMVNwSFBHSHdFek1nWk1zT2NBLTdVRDhKWlJPT01wX09VaWF5ZjVfSWZMRFNHRGppMzJCU2FtX3FYaE5yWDV3Ti1YeTBDaXFOWG1vUVdsdnRQa3E0Y2R4OERDRGc2dEpMdWd4V2tB0gGsAUFVX3lxTE5jSENLYkh4bmkzdEdRanJIZC0zRDU2T1JsSElBLVdsYVN0TEVoZnRKNHdrdjdLNWt0RzNEYWE1dE1PN2dUOWMzeGdPSjlQTm9rTXpSRU5rZS1VUG1oUmo3eFY2VzZaMFgtVE1pNkRLOW56N1pPc2ZhY2ZoUW9CWXpJT3hHU1NaNVNId0dEbF9qWGc0X0VmNWpNX0p2ekxRRXNwb3oyRFVtbUMtT00?oc=5", "source": "The Indian Express", "published_at": "Sun, 16 Aug 2026 05:45:00 GMT"}], "status": "active", "title": "Blue drums, unlikely rescue rafts: How rescuers hunt for trapped Uttarakhand workers - The Indian Express", "url": "https://news.google.com/rss/articles/CBMipgFBVV95cUxOSEM4dFFiWWl2TWlpVzM3MkFtOFItb3duQXBqX3Y4dU1MZE14MENDd3lLcVhmOFVEaFdWb2ZrZlhVMVNwSFBHSHdFek1nWk1zT2NBLTdVRDhKWlJPT01wX09VaWF5ZjVfSWZMRFNHRGppMzJCU2FtX3FYaE5yWDV3Ti1YeTBDaXFOWG1vUVdsdnRQa3E0Y2R4OERDRGc2dEpMdWd4V2tB0gGsAUFVX3lxTE5jSENLYkh4bmkzdEdRanJIZC0zRDU2T1JsSElBLVdsYVN0TEVoZnRKNHdrdjdLNWt0RzNEYWE1dE1PN2dUOWMzeGdPSjlQTm9rTXpSRU5rZS1VUG1oUmo3eFY2VzZaMFgtVE1pNkRLOW56N1pPc2ZhY2ZoUW9CWXpJT3hHU1NaNVNId0dEbF9qWGc0X0VmNWpNX0p2ekxRRXNwb3oyRFVtbUMtT00?oc=5"}, {"event_id": "DISHA-LANDSLIDE-MAHARASHTR_THANE-20260818-02EC", "article_id": "298a2f4a3c2d36f5ae7fa06e31eae6a34315c18c3639cf05d647678cd6ef5331", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["Deccan Herald"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMivwFBVV95cUxNU0NCWHNOYU9NaDNDbElQVmMzalNEeTN5bXpJRHo0WWhuVFdEdV9Gc2RVNjI1Ykh2SDVtTTlZNjBIVUtjcWc4YzU1V3FndXQ4bExFZnJ4Yk4tUVZqVTZVUXIwTHd0eHN1cko0Um9VSU9CaHlCbGh5Zk5MQ09FNUxLSVZlLXZHZjlvVjQyYy1GRVhJdU5hcnNOci1tOG8zMk55ZVFKS2Jpd1VvU0dfaURER2s5dDdsWmF6WWdPYi04Zw?oc=5\" target=\"_blank\">Landslide hits key road stretch in Maharashtra's Thane; no casualties</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">Deccan Herald</font>", "disaster_type": "landslide", "evidence": ["Landslide hits key road stretch in Maharashtra's Thane", "no casualties"], "first_seen_at": "2026-08-18T19:10:00.239449+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:00.239449+00:00", "location": {"country": "India", "state": "Maharashtra", "district": "Thane", "city": "Thane", "latitude": 19.2183, "longitude": 72.9781, "precision": "city"}, "processed_at": "2026-08-18T19:10:00.239449+00:00", "published_at": "Tue, 18 Aug 2026 06:03:07 GMT", "reason": "A landslide struck a major road stretch in Thane, Maharashtra without causing any casualties.", "severity": "low", "source": "Deccan Herald", "source_articles": [{"article_id": "298a2f4a3c2d36f5ae7fa06e31eae6a34315c18c3639cf05d647678cd6ef5331", "title": "Landslide hits key road stretch in Maharashtra's Thane; no casualties - Deccan Herald", "url": "https://news.google.com/rss/articles/CBMivwFBVV95cUxNU0NCWHNOYU9NaDNDbElQVmMzalNEeTN5bXpJRHo0WWhuVFdEdV9Gc2RVNjI1Ykh2SDVtTTlZNjBIVUtjcWc4YzU1V3FndXQ4bExFZnJ4Yk4tUVZqVTZVUXIwTHd0eHN1cko0Um9VSU9CaHlCbGh5Zk5MQ09FNUxLSVZlLXZHZjlvVjQyYy1GRVhJdU5hcnNOci1tOG8zMk55ZVFKS2Jpd1VvU0dfaURER2s5dDdsWmF6WWdPYi04Zw?oc=5", "source": "Deccan Herald", "published_at": "Tue, 18 Aug 2026 06:03:07 GMT"}], "status": "active", "title": "Landslide hits key road stretch in Maharashtra's Thane; no casualties - Deccan Herald", "url": "https://news.google.com/rss/articles/CBMivwFBVV95cUxNU0NCWHNOYU9NaDNDbElQVmMzalNEeTN5bXpJRHo0WWhuVFdEdV9Gc2RVNjI1Ykh2SDVtTTlZNjBIVUtjcWc4YzU1V3FndXQ4bExFZnJ4Yk4tUVZqVTZVUXIwTHd0eHN1cko0Um9VSU9CaHlCbGh5Zk5MQ09FNUxLSVZlLXZHZjlvVjQyYy1GRVhJdU5hcnNOci1tOG8zMk55ZVFKS2Jpd1VvU0dfaURER2s5dDdsWmF6WWdPYi04Zw?oc=5"}, {"event_id": "DISHA-FLOOD-ARUNACHAL_-20260817-6FC2", "article_id": "c3597709364a459320a09e42ba4fafc35146a66da8f7197b9f489bc73f42d9b1", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["Deccan Herald"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi0gFBVV95cUxQeUpiWEVheGliMy1fNDgybXFxZ1RhS1BuMHhyU190a0dtTzE2N0NQRm8wLXRBamNDdmRHZ210Ny1TVnZ2RnJfQzB5VjlfTW5vTUlBUy1ZcjlQN0JlajAyT3p5ZHNLWkZ1NEtLS0hwZWNTWEZ6QmpGcG9TVTdxVmVGcXR1aHJkdjJqY0JXa0FVMEZmLW9XYzVYVUtUZW1yM25GZjRHUHp6UkpNRzRPUWcwUVpOLUQtbXpOUGVmWlRpTTc3dl83OVdNd2RkSnhRU1VfclE?oc=5\" target=\"_blank\">Five army personnel missing after flashfloods hit camps in Arunachal Pradesh</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">Deccan Herald</font>", "disaster_type": "flood", "evidence": ["Five army personnel missing", "flashfloods hit camps in Arunachal Pradesh"], "first_seen_at": "2026-08-18T19:10:00.307028+00:00", "incident_date": "2026-08-17", "last_updated_at": "2026-08-18T19:10:00.307028+00:00", "location": {"country": "India", "state": "Arunachal Pradesh", "district": null, "city": null, "latitude": 28.218, "longitude": 94.7278, "precision": "state"}, "processed_at": "2026-08-18T19:10:00.307028+00:00", "published_at": "Mon, 17 Aug 2026 13:33:37 GMT", "reason": "Flash floods hit military camps in Arunachal Pradesh, leaving five army personnel missing.", "severity": "high", "source": "Deccan Herald", "source_articles": [{"article_id": "c3597709364a459320a09e42ba4fafc35146a66da8f7197b9f489bc73f42d9b1", "title": "Five army personnel missing after flashfloods hit camps in Arunachal Pradesh - Deccan Herald", "url": "https://news.google.com/rss/articles/CBMi0gFBVV95cUxQeUpiWEVheGliMy1fNDgybXFxZ1RhS1BuMHhyU190a0dtTzE2N0NQRm8wLXRBamNDdmRHZ210Ny1TVnZ2RnJfQzB5VjlfTW5vTUlBUy1ZcjlQN0JlajAyT3p5ZHNLWkZ1NEtLS0hwZWNTWEZ6QmpGcG9TVTdxVmVGcXR1aHJkdjJqY0JXa0FVMEZmLW9XYzVYVUtUZW1yM25GZjRHUHp6UkpNRzRPUWcwUVpOLUQtbXpOUGVmWlRpTTc3dl83OVdNd2RkSnhRU1VfclE?oc=5", "source": "Deccan Herald", "published_at": "Mon, 17 Aug 2026 13:33:37 GMT"}], "status": "active", "title": "Five army personnel missing after flashfloods hit camps in Arunachal Pradesh - Deccan Herald", "url": "https://news.google.com/rss/articles/CBMi0gFBVV95cUxQeUpiWEVheGliMy1fNDgybXFxZ1RhS1BuMHhyU190a0dtTzE2N0NQRm8wLXRBamNDdmRHZ210Ny1TVnZ2RnJfQzB5VjlfTW5vTUlBUy1ZcjlQN0JlajAyT3p5ZHNLWkZ1NEtLS0hwZWNTWEZ6QmpGcG9TVTdxVmVGcXR1aHJkdjJqY0JXa0FVMEZmLW9XYzVYVUtUZW1yM25GZjRHUHp6UkpNRzRPUWcwUVpOLUQtbXpOUGVmWlRpTTc3dl83OVdNd2RkSnhRU1VfclE?oc=5"}, {"event_id": "DISHA-FLOOD-ODISHA_KENDRAPARA-20260818-E732", "article_id": "c1a808adcec0c378827884374a0a9b4682ee9a90a7642845f289f076811c1aa2", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "ONGOING_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["orissadiary.com"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMirAFBVV95cUxPRW5mTlJvaFZ3LUtwR19oWU1VMzlPSk53QklodC02UFhQWjZSNk03UHF2M1ItVXpWWkxSX1J3RnpHcjRrQ1NJMXJjNzJ0S3djWThaNXJVT05oMUl3VW5vNzRBUnJiVUtYQVc5R25BZDF3MjBzRkc0WUU4aGdjaGxSODRpOEdMNzBxZlcyWnpGUXNZZllORzNIek1fd1J5RVBPWHJBNzg4azUxV3BI?oc=5\" target=\"_blank\">Marooned by Floods, Kendrapara Villagers Forced to Boil and Drink Contaminated Water</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">orissadiary.com</font>", "disaster_type": "flood", "evidence": ["Marooned by Floods, Kendrapara Villagers", "Forced to Boil and Drink Contaminated Water"], "first_seen_at": "2026-08-18T19:10:00.358691+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:00.358691+00:00", "location": {"country": "India", "state": "Odisha", "district": "Kendrapara", "city": null, "latitude": 20.5, "longitude": 86.42, "precision": "district"}, "processed_at": "2026-08-18T19:10:00.358691+00:00", "published_at": "Tue, 18 Aug 2026 10:42:27 GMT", "reason": "Villagers in Kendrapara, Odisha are marooned by floodwaters and forced to drink contaminated water.", "severity": "medium", "source": "orissadiary.com", "source_articles": [{"article_id": "c1a808adcec0c378827884374a0a9b4682ee9a90a7642845f289f076811c1aa2", "title": "Marooned by Floods, Kendrapara Villagers Forced to Boil and Drink Contaminated Water - orissadiary.com", "url": "https://news.google.com/rss/articles/CBMirAFBVV95cUxPRW5mTlJvaFZ3LUtwR19oWU1VMzlPSk53QklodC02UFhQWjZSNk03UHF2M1ItVXpWWkxSX1J3RnpHcjRrQ1NJMXJjNzJ0S3djWThaNXJVT05oMUl3VW5vNzRBUnJiVUtYQVc5R25BZDF3MjBzRkc0WUU4aGdjaGxSODRpOEdMNzBxZlcyWnpGUXNZZllORzNIek1fd1J5RVBPWHJBNzg4azUxV3BI?oc=5", "source": "orissadiary.com", "published_at": "Tue, 18 Aug 2026 10:42:27 GMT"}], "status": "active", "title": "Marooned by Floods, Kendrapara Villagers Forced to Boil and Drink Contaminated Water - orissadiary.com", "url": "https://news.google.com/rss/articles/CBMirAFBVV95cUxPRW5mTlJvaFZ3LUtwR19oWU1VMzlPSk53QklodC02UFhQWjZSNk03UHF2M1ItVXpWWkxSX1J3RnpHcjRrQ1NJMXJjNzJ0S3djWThaNXJVT05oMUl3VW5vNzRBUnJiVUtYQVc5R25BZDF3MjBzRkc0WUU4aGdjaGxSODRpOEdMNzBxZlcyWnpGUXNZZllORzNIek1fd1J5RVBPWHJBNzg4azUxV3BI?oc=5"}, {"event_id": "DISHA-LANDSLIDE-WEST_BENGA_KALIMPONG-20260818-D893", "article_id": "7f7ca87909b580d0113c6dd9cbf5e77a82cf403cc420f45edd55451b41d832c3", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["Al Arabiya English"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMiswFBVV95cUxQS1pHR2hPVXBYVEVuanZHQmItNWVhWnpCUUpnamUxUkFTUFIzVTNub1pKRi1DRHhvdjhqbnUtWU1FU0twMDF4MDBMTE1GbWNoWmMzazZJUF9taGJxdGlxTmtKSDJUclkxejlSV21hc2FOTkkyd05vX0RxNXQwMEM1bHJpU0Z0aFN2V21oZFpBbnVVcDJIalRrbXhmdzB3VEduWFJROU05X0FGc2tXV1EyYVhxUdIBuAFBVV95cUxQWmR0YkthMUZWbzE5Zy1yb0ZaNUtDeU83b0F5QXlsaFVqTnBUVDl2b0NYeHgybnE5QWdfaHU5c1NKMHlHRWp2ZEZ6Z2k4SW5uMXp6blpsa0Z5aXQ3OVNZWm9OMEJ6RWw0c3BSbG1FYjAtRlMwbTZjcWhGWUVmUERQZm1XVE9aUUJDSGg0TzZqSmRwbGY5OHFHQ3ZuMzQxLURXLTVwVElJNkp4VWYzVFdYcGFSQzhxelJ3?oc=5\" target=\"_blank\">Huge Landslide Hits India\u2019s Kalimpong, Biker Narrowly Escapes</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">Al Arabiya English</font>", "disaster_type": "landslide", "evidence": ["Huge Landslide Hits India\u2019s Kalimpong", "Biker Narrowly Escapes"], "first_seen_at": "2026-08-18T19:10:00.408168+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:00.408168+00:00", "location": {"country": "India", "state": "West Bengal", "district": "Kalimpong", "city": "Kalimpong", "latitude": 27.06, "longitude": 88.47, "precision": "city"}, "processed_at": "2026-08-18T19:10:00.408168+00:00", "published_at": "Tue, 18 Aug 2026 12:39:59 GMT", "reason": "A massive landslide hit Kalimpong in West Bengal, nearly burying a motorcyclist.", "severity": "medium", "source": "Al Arabiya English", "source_articles": [{"article_id": "7f7ca87909b580d0113c6dd9cbf5e77a82cf403cc420f45edd55451b41d832c3", "title": "Huge Landslide Hits India\u2019s Kalimpong, Biker Narrowly Escapes - Al Arabiya English", "url": "https://news.google.com/rss/articles/CBMiswFBVV95cUxQS1pHR2hPVXBYVEVuanZHQmItNWVhWnpCUUpnamUxUkFTUFIzVTNub1pKRi1DRHhvdjhqbnUtWU1FU0twMDF4MDBMTE1GbWNoWmMzazZJUF9taGJxdGlxTmtKSDJUclkxejlSV21hc2FOTkkyd05vX0RxNXQwMEM1bHJpU0Z0aFN2V21oZFpBbnVVcDJIalRrbXhmdzB3VEduWFJROU05X0FGc2tXV1EyYVhxUdIBuAFBVV95cUxQWmR0YkthMUZWbzE5Zy1yb0ZaNUtDeU83b0F5QXlsaFVqTnBUVDl2b0NYeHgybnE5QWdfaHU5c1NKMHlHRWp2ZEZ6Z2k4SW5uMXp6blpsa0Z5aXQ3OVNZWm9OMEJ6RWw0c3BSbG1FYjAtRlMwbTZjcWhGWUVmUERQZm1XVE9aUUJDSGg0TzZqSmRwbGY5OHFHQ3ZuMzQxLURXLTVwVElJNkp4VWYzVFdYcGFSQzhxelJ3?oc=5", "source": "Al Arabiya English", "published_at": "Tue, 18 Aug 2026 12:39:59 GMT"}], "status": "active", "title": "Huge Landslide Hits India\u2019s Kalimpong, Biker Narrowly Escapes - Al Arabiya English", "url": "https://news.google.com/rss/articles/CBMiswFBVV95cUxQS1pHR2hPVXBYVEVuanZHQmItNWVhWnpCUUpnamUxUkFTUFIzVTNub1pKRi1DRHhvdjhqbnUtWU1FU0twMDF4MDBMTE1GbWNoWmMzazZJUF9taGJxdGlxTmtKSDJUclkxejlSV21hc2FOTkkyd05vX0RxNXQwMEM1bHJpU0Z0aFN2V21oZFpBbnVVcDJIalRrbXhmdzB3VEduWFJROU05X0FGc2tXV1EyYVhxUdIBuAFBVV95cUxQWmR0YkthMUZWbzE5Zy1yb0ZaNUtDeU83b0F5QXlsaFVqTnBUVDl2b0NYeHgybnE5QWdfaHU5c1NKMHlHRWp2ZEZ6Z2k4SW5uMXp6blpsa0Z5aXQ3OVNZWm9OMEJ6RWw0c3BSbG1FYjAtRlMwbTZjcWhGWUVmUERQZm1XVE9aUUJDSGg0TzZqSmRwbGY5OHFHQ3ZuMzQxLURXLTVwVElJNkp4VWYzVFdYcGFSQzhxelJ3?oc=5"}, {"event_id": "DISHA-LANDSLIDE-SIKKIM-20260816-03EC", "article_id": "5b780b5940708be47efb79b0d8ebee5ca13d828d0c29fde22cb52c3c0e8e8370", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["Northeast Live"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMitgFBVV95cUxQaEFDanZsUWt4V0F6UTdwUWdGdnd4elctVDItWkczQS1NNlNfRnc2d255MkxmaUdBaVB4dFB1ZmRBSWs0R19oNEg3X3h6cjVxY3JyampGbFBETDBhb0N3QmpnNlJOVGhiLUxPYlI4Szd3ekVQUGFVblNHQU5RYnRFSE80YkV2V1U4TGlKenViZ2NQS0NNYzVnZmhkMGoxdWlybzE4MGQtRFVYVEdfNEVJMTJ6OTFjQQ?oc=5\" target=\"_blank\">Sikkim: 35 Households Evacuated as Relief Efforts Begin at Rimbi Landslide Site</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">Northeast Live</font>", "disaster_type": "landslide", "evidence": ["35 Households Evacuated", "Rimbi Landslide Site"], "first_seen_at": "2026-08-18T19:10:00.537220+00:00", "incident_date": "2026-08-16", "last_updated_at": "2026-08-18T19:10:00.537220+00:00", "location": {"country": "India", "state": "Sikkim", "district": null, "city": null, "latitude": 27.533, "longitude": 88.5122, "precision": "state"}, "processed_at": "2026-08-18T19:10:00.537220+00:00", "published_at": "Sun, 16 Aug 2026 05:30:01 GMT", "reason": "A landslide at Rimbi in Sikkim forced the evacuation of 35 households.", "severity": "medium", "source": "Northeast Live", "source_articles": [{"article_id": "5b780b5940708be47efb79b0d8ebee5ca13d828d0c29fde22cb52c3c0e8e8370", "title": "Sikkim: 35 Households Evacuated as Relief Efforts Begin at Rimbi Landslide Site - Northeast Live", "url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxQaEFDanZsUWt4V0F6UTdwUWdGdnd4elctVDItWkczQS1NNlNfRnc2d255MkxmaUdBaVB4dFB1ZmRBSWs0R19oNEg3X3h6cjVxY3JyampGbFBETDBhb0N3QmpnNlJOVGhiLUxPYlI4Szd3ekVQUGFVblNHQU5RYnRFSE80YkV2V1U4TGlKenViZ2NQS0NNYzVnZmhkMGoxdWlybzE4MGQtRFVYVEdfNEVJMTJ6OTFjQQ?oc=5", "source": "Northeast Live", "published_at": "Sun, 16 Aug 2026 05:30:01 GMT"}], "status": "active", "title": "Sikkim: 35 Households Evacuated as Relief Efforts Begin at Rimbi Landslide Site - Northeast Live", "url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxQaEFDanZsUWt4V0F6UTdwUWdGdnd4elctVDItWkczQS1NNlNfRnc2d255MkxmaUdBaVB4dFB1ZmRBSWs0R19oNEg3X3h6cjVxY3JyampGbFBETDBhb0N3QmpnNlJOVGhiLUxPYlI4Szd3ekVQUGFVblNHQU5RYnRFSE80YkV2V1U4TGlKenViZ2NQS0NNYzVnZmhkMGoxdWlybzE4MGQtRFVYVEdfNEVJMTJ6OTFjQQ?oc=5"}, {"event_id": "DISHA-CLOUDBURST-HIMACHAL_P-20260817-202E", "article_id": "89e7c3bc0c8c701251c3396c2433432b2adb88b12437c056edc2ac3550e8a30f", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["News On AIR"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMisgFBVV95cUxNejZ1TXU3SGhfcFlOeWdPQmsta2ZpZE1qNUN4YlEtZ1o4eGFIa09YXzdJNmRTclBnX2tHM0dXMDdZcTd1UDZnY2E0azBhaS1vTFBkdTg0bU8xa2VhQ1RFS2NxU0htdFh5bGMtcjNzLVU1OUtMdG5OcmxndTk5WlRHM2FwTlJQdFJTOTJTTThYQi1uektITlhkaGFfWlZ4QTYxcmt3Tk1aaWNvQjlJeWI2eFVn?oc=5\" target=\"_blank\">Cloudburst damages pilgrim path to Maa Bhagwati Khundi Wali Temple in Himachal Pradesh</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">News On AIR</font>", "disaster_type": "cloudburst", "evidence": ["Cloudburst damages pilgrim path", "temple in Himachal Pradesh"], "first_seen_at": "2026-08-18T19:10:00.626853+00:00", "incident_date": "2026-08-17", "last_updated_at": "2026-08-18T19:10:00.626853+00:00", "location": {"country": "India", "state": "Himachal Pradesh", "district": null, "city": null, "latitude": 31.1048, "longitude": 77.1734, "precision": "state"}, "processed_at": "2026-08-18T19:10:00.626853+00:00", "published_at": "Mon, 17 Aug 2026 08:37:30 GMT", "reason": "A cloudburst damaged a pilgrim path to the Maa Bhagwati Khundi Wali Temple in Himachal Pradesh.", "severity": "medium", "source": "News On AIR", "source_articles": [{"article_id": "89e7c3bc0c8c701251c3396c2433432b2adb88b12437c056edc2ac3550e8a30f", "title": "Cloudburst damages pilgrim path to Maa Bhagwati Khundi Wali Temple in Himachal Pradesh - News On AIR", "url": "https://news.google.com/rss/articles/CBMisgFBVV95cUxNejZ1TXU3SGhfcFlOeWdPQmsta2ZpZE1qNUN4YlEtZ1o4eGFIa09YXzdJNmRTclBnX2tHM0dXMDdZcTd1UDZnY2E0azBhaS1vTFBkdTg0bU8xa2VhQ1RFS2NxU0htdFh5bGMtcjNzLVU1OUtMdG5OcmxndTk5WlRHM2FwTlJQdFJTOTJTTThYQi1uektITlhkaGFfWlZ4QTYxcmt3Tk1aaWNvQjlJeWI2eFVn?oc=5", "source": "News On AIR", "published_at": "Mon, 17 Aug 2026 08:37:30 GMT"}], "status": "active", "title": "Cloudburst damages pilgrim path to Maa Bhagwati Khundi Wali Temple in Himachal Pradesh - News On AIR", "url": "https://news.google.com/rss/articles/CBMisgFBVV95cUxNejZ1TXU3SGhfcFlOeWdPQmsta2ZpZE1qNUN4YlEtZ1o4eGFIa09YXzdJNmRTclBnX2tHM0dXMDdZcTd1UDZnY2E0azBhaS1vTFBkdTg0bU8xa2VhQ1RFS2NxU0htdFh5bGMtcjNzLVU1OUtMdG5OcmxndTk5WlRHM2FwTlJQdFJTOTJTTThYQi1uektITlhkaGFfWlZ4QTYxcmt3Tk1aaWNvQjlJeWI2eFVn?oc=5"}, {"event_id": "DISHA-HEAVY_RAIN-CHANDIGARH_CHANDIGARH-20260818-C457", "article_id": "5b5d72911ac2745b0471a916da3ce4155d3daaaaf78fd04c17e640bfb4098335", "classification": {"model": "gemini-3.6-flash", "confidence": 0.9, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.9, "corroboration": {"source_count": 1, "sources": ["The Tribune"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMixgFBVV95cUxQbEtvUXZucF9wX3QxQndhVWZFc0tPSk1uMVNOSWhFaFMwQnh6Nkw1QVdtQUFvOEthVTZuVlItWmRwZHdOdWsxRUFqVk1jQmRpSWkwMHdkb2MyejJUYVZLdGhYdUJWNTNYTjFtQkt4YmxhRjBzVWlyWXJNbGs5eXVPaVlYMHIxUUhhckVrWDduNWFRbmUzVEE5bTgxRmttTVU3bm9PN05jNElpSVg3LXI5YVZkT0d6cTV5S0JHUnlQdVRheHl2b1HSAcoBQVVfeXFMTW1sNFBDaFVXZXpMeTNPaHQ0QUxOTWlwS28zYV9fY3RrckxtU25SNlRSb0RUOFBiTXRpVHRNaVQwWEJNa01PbFBibUhtbWp4bUVNRm8zOGYtUDdJQUZQUEo0SVlnbXAwYUhKOXBVVllSRW05QmRnandwMTNyMUc2LVN5ckxfS3daMVdMeUdYMUF2TkY0MUlJdEJnUEkzRXdaQ0oxYVYyQU9FSjNqakt4TUNkbGFKMk9mbzRtNTByRUhhU2NadGxzTDhXQQ?oc=5\" target=\"_blank\">Heavy rain in Chandigarh tricity leaves several areas waterlogged</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">The Tribune</font>", "disaster_type": "heavy_rain", "evidence": ["Heavy rain in Chandigarh tricity", "leaves several areas waterlogged"], "first_seen_at": "2026-08-18T19:10:00.758684+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:00.758684+00:00", "location": {"country": "India", "state": "Chandigarh", "district": "Chandigarh", "city": "Chandigarh", "latitude": 30.7333, "longitude": 76.7794, "precision": "city"}, "processed_at": "2026-08-18T19:10:00.758684+00:00", "published_at": "Tue, 18 Aug 2026 12:16:55 GMT", "reason": "Heavy rainfall in the Chandigarh tricity area caused widespread waterlogging across multiple localities.", "severity": "low", "source": "The Tribune", "source_articles": [{"article_id": "5b5d72911ac2745b0471a916da3ce4155d3daaaaf78fd04c17e640bfb4098335", "title": "Heavy rain in Chandigarh tricity leaves several areas waterlogged - The Tribune", "url": "https://news.google.com/rss/articles/CBMixgFBVV95cUxQbEtvUXZucF9wX3QxQndhVWZFc0tPSk1uMVNOSWhFaFMwQnh6Nkw1QVdtQUFvOEthVTZuVlItWmRwZHdOdWsxRUFqVk1jQmRpSWkwMHdkb2MyejJUYVZLdGhYdUJWNTNYTjFtQkt4YmxhRjBzVWlyWXJNbGs5eXVPaVlYMHIxUUhhckVrWDduNWFRbmUzVEE5bTgxRmttTVU3bm9PN05jNElpSVg3LXI5YVZkT0d6cTV5S0JHUnlQdVRheHl2b1HSAcoBQVVfeXFMTW1sNFBDaFVXZXpMeTNPaHQ0QUxOTWlwS28zYV9fY3RrckxtU25SNlRSb0RUOFBiTXRpVHRNaVQwWEJNa01PbFBibUhtbWp4bUVNRm8zOGYtUDdJQUZQUEo0SVlnbXAwYUhKOXBVVllSRW05QmRnandwMTNyMUc2LVN5ckxfS3daMVdMeUdYMUF2TkY0MUlJdEJnUEkzRXdaQ0oxYVYyQU9FSjNqakt4TUNkbGFKMk9mbzRtNTByRUhhU2NadGxzTDhXQQ?oc=5", "source": "The Tribune", "published_at": "Tue, 18 Aug 2026 12:16:55 GMT"}], "status": "active", "title": "Heavy rain in Chandigarh tricity leaves several areas waterlogged - The Tribune", "url": "https://news.google.com/rss/articles/CBMixgFBVV95cUxQbEtvUXZucF9wX3QxQndhVWZFc0tPSk1uMVNOSWhFaFMwQnh6Nkw1QVdtQUFvOEthVTZuVlItWmRwZHdOdWsxRUFqVk1jQmRpSWkwMHdkb2MyejJUYVZLdGhYdUJWNTNYTjFtQkt4YmxhRjBzVWlyWXJNbGs5eXVPaVlYMHIxUUhhckVrWDduNWFRbmUzVEE5bTgxRmttTVU3bm9PN05jNElpSVg3LXI5YVZkT0d6cTV5S0JHUnlQdVRheHl2b1HSAcoBQVVfeXFMTW1sNFBDaFVXZXpMeTNPaHQ0QUxOTWlwS28zYV9fY3RrckxtU25SNlRSb0RUOFBiTXRpVHRNaVQwWEJNa01PbFBibUhtbWp4bUVNRm8zOGYtUDdJQUZQUEo0SVlnbXAwYUhKOXBVVllSRW05QmRnandwMTNyMUc2LVN5ckxfS3daMVdMeUdYMUF2TkY0MUlJdEJnUEkzRXdaQ0oxYVYyQU9FSjNqakt4TUNkbGFKMk9mbzRtNTByRUhhU2NadGxzTDhXQQ?oc=5"}, {"event_id": "DISHA-HEAVY_RAIN-UTTAR_PRAD_PRAYAGRAJ-20260818-275E", "article_id": "a926a008ad5de2dd0023f4e1b845901c9740ac9f22aab2595e5e2ca7d78b8f85", "classification": {"model": "gemini-3.6-flash", "confidence": 0.9, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.9, "corroboration": {"source_count": 1, "sources": ["The Times of India"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi8wFBVV95cUxOWjBoWE5mT1VvWVhhZ2NicC1rd0hvcHo3dzUzYTRIRWRXeGNhZFhobnp1bnJteW1NY3hBejlLM1Nxb0ttUGxlZldtOWxjSHR0VFpEQVV2SzVOVk5nZnFjN1JmcEU3TUgxcDlmM3duMmlWMFhxVG1zOEVSaGoyNTIyb2xJU1VHTE5yNElZNEhHQV9ienpXYXBxYWg5d1p0WEl6bkUzT0FlbGhaQnhkWC03WXJoSDhhUXRZMXlsT3dxeHh4eXU2Nks5MkhzWFdWSkd2Q0JxS2FidHloRnRUdTd1MU1rXzBLdWVmTmVuNUsxaElFN1HSAfgBQVVfeXFMTWotRTFFMXJ0WVJIOF82cm4yY2NxS3VOR1J6dmYwR09RU0JsUWx2aWdwTjE1X1hxalUzeFdSd1U2N1Y2SHdMSFFxWUdjT0lucnhrYTRRbFFvSERhTmU5SUR3NXVaVWtRLTJrUGFEM0l0dUFMb2czZzZhYkx5ZGYzMS03a2VmanBQbXljQUFlX3g3ZzFFdnVhSHJieEZpQlowd19sdnJWNW9DZGJxQmNXV1U1VTRhTVdNU1BtMUpEOHdMOHRrNHJBOGctazVRX3lzb2lGU3h0NTF1Y2hSMnFlNGlwSXB5U285blhNcjZFVGVfU3ZTd015aHA?oc=5\" target=\"_blank\">Prayagraj Rain: Schools closed amid severe waterlogging, IMD warns of heavy rain in UP</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">The Times of India</font>", "disaster_type": "heavy_rain", "evidence": ["Schools closed amid severe waterlogging", "Prayagraj Rain"], "first_seen_at": "2026-08-18T19:10:00.815872+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:00.815872+00:00", "location": {"country": "India", "state": "Uttar Pradesh", "district": "Prayagraj", "city": "Prayagraj", "latitude": 25.4358, "longitude": 81.8463, "precision": "city"}, "processed_at": "2026-08-18T19:10:00.815872+00:00", "published_at": "Tue, 18 Aug 2026 03:36:00 GMT", "reason": "Heavy rain caused severe waterlogging in Prayagraj, forcing schools to shut down.", "severity": "low", "source": "The Times of India", "source_articles": [{"article_id": "a926a008ad5de2dd0023f4e1b845901c9740ac9f22aab2595e5e2ca7d78b8f85", "title": "Prayagraj Rain: Schools closed amid severe waterlogging, IMD warns of heavy rain in UP - The Times of India", "url": "https://news.google.com/rss/articles/CBMi8wFBVV95cUxOWjBoWE5mT1VvWVhhZ2NicC1rd0hvcHo3dzUzYTRIRWRXeGNhZFhobnp1bnJteW1NY3hBejlLM1Nxb0ttUGxlZldtOWxjSHR0VFpEQVV2SzVOVk5nZnFjN1JmcEU3TUgxcDlmM3duMmlWMFhxVG1zOEVSaGoyNTIyb2xJU1VHTE5yNElZNEhHQV9ienpXYXBxYWg5d1p0WEl6bkUzT0FlbGhaQnhkWC03WXJoSDhhUXRZMXlsT3dxeHh4eXU2Nks5MkhzWFdWSkd2Q0JxS2FidHloRnRUdTd1MU1rXzBLdWVmTmVuNUsxaElFN1HSAfgBQVVfeXFMTWotRTFFMXJ0WVJIOF82cm4yY2NxS3VOR1J6dmYwR09RU0JsUWx2aWdwTjE1X1hxalUzeFdSd1U2N1Y2SHdMSFFxWUdjT0lucnhrYTRRbFFvSERhTmU5SUR3NXVaVWtRLTJrUGFEM0l0dUFMb2czZzZhYkx5ZGYzMS03a2VmanBQbXljQUFlX3g3ZzFFdnVhSHJieEZpQlowd19sdnJWNW9DZGJxQmNXV1U1VTRhTVdNU1BtMUpEOHdMOHRrNHJBOGctazVRX3lzb2lGU3h0NTF1Y2hSMnFlNGlwSXB5U285blhNcjZFVGVfU3ZTd015aHA?oc=5", "source": "The Times of India", "published_at": "Tue, 18 Aug 2026 03:36:00 GMT"}], "status": "active", "title": "Prayagraj Rain: Schools closed amid severe waterlogging, IMD warns of heavy rain in UP - The Times of India", "url": "https://news.google.com/rss/articles/CBMi8wFBVV95cUxOWjBoWE5mT1VvWVhhZ2NicC1rd0hvcHo3dzUzYTRIRWRXeGNhZFhobnp1bnJteW1NY3hBejlLM1Nxb0ttUGxlZldtOWxjSHR0VFpEQVV2SzVOVk5nZnFjN1JmcEU3TUgxcDlmM3duMmlWMFhxVG1zOEVSaGoyNTIyb2xJU1VHTE5yNElZNEhHQV9ienpXYXBxYWg5d1p0WEl6bkUzT0FlbGhaQnhkWC03WXJoSDhhUXRZMXlsT3dxeHh4eXU2Nks5MkhzWFdWSkd2Q0JxS2FidHloRnRUdTd1MU1rXzBLdWVmTmVuNUsxaElFN1HSAfgBQVVfeXFMTWotRTFFMXJ0WVJIOF82cm4yY2NxS3VOR1J6dmYwR09RU0JsUWx2aWdwTjE1X1hxalUzeFdSd1U2N1Y2SHdMSFFxWUdjT0lucnhrYTRRbFFvSERhTmU5SUR3NXVaVWtRLTJrUGFEM0l0dUFMb2czZzZhYkx5ZGYzMS03a2VmanBQbXljQUFlX3g3ZzFFdnVhSHJieEZpQlowd19sdnJWNW9DZGJxQmNXV1U1VTRhTVdNU1BtMUpEOHdMOHRrNHJBOGctazVRX3lzb2lGU3h0NTF1Y2hSMnFlNGlwSXB5U285blhNcjZFVGVfU3ZTd015aHA?oc=5"}, {"event_id": "DISHA-LANDSLIDE-UTTARAKHAN-20260818-A03E", "article_id": "daefbf92de3c49fc397d54abf73292f4f74d903d6e9c3516e13c4b5e91814cbe", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["India Today"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi1gFBVV95cUxOQng5Um9MYnZXNVpJSkQzM0Y4SlhPTG9ybkpsazBtT0k0ejgyZlc3TjZEYTBQVXVIV2E0dHU1WThLYjN6TnIyTzkycW8tc2U3SUY4TFk5QUlaMzIzSWs5Uk5ZTV9wVjZLTS1NU24xMzcwazJ4UHFxTXBfUzJKV21VUG54all3ckV0ckRROElIYl84b29rQ1psVEpLN2lEYWhBZVUwWk81TjJXbFRDVk83QlZyWmxaY2YzaTZoeGtWeVA1dldDTkZScmN1WjFVRF8xU3YzYnFn0gHbAUFVX3lxTE55ZmZXVDk5Wjc1bEJFeE5BTXZsSTBIbUUtcEZobG9Cd09DZEp3SE45cms4SjhLdXBXQ3dGMXlGa1RLLVNFRlRUald4U2EyV1NHU3c0MEtiSlVrdjg5QUxUNEhuTlkyMmVBSmRmdTB6UDRRV29SS3ZaMklsRnpGUUZjSFlUSWtCMDEwcGc2S3pCZGVwQ3hseEF3RFVYZzlUOUxRcUpZZ3hUVDZTekNjcWtac1c0VUJ3OWNaaHh4MDk4SndSeTNOUVpqaHRWVFNjNHhVU18wU3VrSF9OQQ?oc=5\" target=\"_blank\">Uttarakhand battered by rain as landslides shut roads, rivers swell</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">India Today</font>", "disaster_type": "landslide", "evidence": ["Uttarakhand battered by rain as landslides shut roads", "rivers swell"], "first_seen_at": "2026-08-18T19:10:24.772911+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:24.772911+00:00", "location": {"country": "India", "state": "Uttarakhand", "district": null, "city": null, "latitude": 30.0668, "longitude": 79.0193, "precision": "state"}, "processed_at": "2026-08-18T19:10:24.772911+00:00", "published_at": "Tue, 18 Aug 2026 12:42:03 GMT", "reason": "Heavy rainfall in Uttarakhand triggered landslides that shut down roads and caused rivers to swell.", "severity": "medium", "source": "India Today", "source_articles": [{"article_id": "daefbf92de3c49fc397d54abf73292f4f74d903d6e9c3516e13c4b5e91814cbe", "title": "Uttarakhand battered by rain as landslides shut roads, rivers swell - India Today", "url": "https://news.google.com/rss/articles/CBMi1gFBVV95cUxOQng5Um9MYnZXNVpJSkQzM0Y4SlhPTG9ybkpsazBtT0k0ejgyZlc3TjZEYTBQVXVIV2E0dHU1WThLYjN6TnIyTzkycW8tc2U3SUY4TFk5QUlaMzIzSWs5Uk5ZTV9wVjZLTS1NU24xMzcwazJ4UHFxTXBfUzJKV21VUG54all3ckV0ckRROElIYl84b29rQ1psVEpLN2lEYWhBZVUwWk81TjJXbFRDVk83QlZyWmxaY2YzaTZoeGtWeVA1dldDTkZScmN1WjFVRF8xU3YzYnFn0gHbAUFVX3lxTE55ZmZXVDk5Wjc1bEJFeE5BTXZsSTBIbUUtcEZobG9Cd09DZEp3SE45cms4SjhLdXBXQ3dGMXlGa1RLLVNFRlRUald4U2EyV1NHU3c0MEtiSlVrdjg5QUxUNEhuTlkyMmVBSmRmdTB6UDRRV29SS3ZaMklsRnpGUUZjSFlUSWtCMDEwcGc2S3pCZGVwQ3hseEF3RFVYZzlUOUxRcUpZZ3hUVDZTekNjcWtac1c0VUJ3OWNaaHh4MDk4SndSeTNOUVpqaHRWVFNjNHhVU18wU3VrSF9OQQ?oc=5", "source": "India Today", "published_at": "Tue, 18 Aug 2026 12:42:03 GMT"}], "status": "active", "title": "Uttarakhand battered by rain as landslides shut roads, rivers swell - India Today", "url": "https://news.google.com/rss/articles/CBMi1gFBVV95cUxOQng5Um9MYnZXNVpJSkQzM0Y4SlhPTG9ybkpsazBtT0k0ejgyZlc3TjZEYTBQVXVIV2E0dHU1WThLYjN6TnIyTzkycW8tc2U3SUY4TFk5QUlaMzIzSWs5Uk5ZTV9wVjZLTS1NU24xMzcwazJ4UHFxTXBfUzJKV21VUG54all3ckV0ckRROElIYl84b29rQ1psVEpLN2lEYWhBZVUwWk81TjJXbFRDVk83QlZyWmxaY2YzaTZoeGtWeVA1dldDTkZScmN1WjFVRF8xU3YzYnFn0gHbAUFVX3lxTE55ZmZXVDk5Wjc1bEJFeE5BTXZsSTBIbUUtcEZobG9Cd09DZEp3SE45cms4SjhLdXBXQ3dGMXlGa1RLLVNFRlRUald4U2EyV1NHU3c0MEtiSlVrdjg5QUxUNEhuTlkyMmVBSmRmdTB6UDRRV29SS3ZaMklsRnpGUUZjSFlUSWtCMDEwcGc2S3pCZGVwQ3hseEF3RFVYZzlUOUxRcUpZZ3hUVDZTekNjcWtac1c0VUJ3OWNaaHh4MDk4SndSeTNOUVpqaHRWVFNjNHhVU18wU3VrSF9OQQ?oc=5"}, {"event_id": "DISHA-FLOOD-HIMACHAL_P-20260817-6531", "article_id": "10db4776b1b424018d3504670817b8c1bb76cf40899d49b1d94b8e4d43f587b0", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["India Today"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi3AFBVV95cUxQZXFNcTVKWWlTeWVfdDA2cmFDclRTVTlIY1IzRWI2akZPaTliYi1WaEJDQ2IyVzhVRmFTQWR3ZnUwNExVcEthSnA0endZaWxDaEZFeEc0OE1iZHdvYmRvU05LTno2LW92TXlKeXV5RHlyajBfUzVibWlGM1djSzJmTlVnSnNiRWhWVzJiaVkwQmRuS3lhWk54TFFYUkUtOWVhWHRGRjRUamIyVWo3ZjBOSnpoSWZkY2x1TnpNUTZFMngtTERacUNnd0hFa1U5dk9SZEJLa0NyLXJURlEw0gHiAUFVX3lxTE42LUkwNF85NTNseGp3UVdfS1E5UzJseUZfMzJzOGJpUnhDMVJEVzk4MmFIREZzRFFqY1lTNEtCd2Jxb0lpbE1lX1YzVmp1UzdpN1B4RGdqbXpNalZCQktRZUl2dUM2VlJpazJoUGNXTjdmSjNacWZ3WlkwSkM3N3Q1eE51enJJQmw2QXQwamtHbjB3RTJlcEVYXzF2YXZhRm45THNhV0lSZGZDd1Y0OWV5Y0oxa0J4YnZQeWxzSExCd2I0QXVOMl9xS2w0TVlKMHZKbGV4XzV1bTBYNVNaVG9Bb1E?oc=5\" target=\"_blank\">Himachal man carries groom on his back as flash flood blocks wedding procession</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">India Today</font>", "disaster_type": "flood", "evidence": ["flash flood blocks wedding procession", "Himachal man carries groom on his back"], "first_seen_at": "2026-08-18T19:10:24.867848+00:00", "incident_date": "2026-08-17", "last_updated_at": "2026-08-18T19:10:24.867848+00:00", "location": {"country": "India", "state": "Himachal Pradesh", "district": null, "city": null, "latitude": 31.1048, "longitude": 77.1734, "precision": "state"}, "processed_at": "2026-08-18T19:10:24.867848+00:00", "published_at": "Mon, 17 Aug 2026 08:36:58 GMT", "reason": "Flash floods blocked a wedding procession in Himachal Pradesh.", "severity": "medium", "source": "India Today", "source_articles": [{"article_id": "10db4776b1b424018d3504670817b8c1bb76cf40899d49b1d94b8e4d43f587b0", "title": "Himachal man carries groom on his back as flash flood blocks wedding procession - India Today", "url": "https://news.google.com/rss/articles/CBMi3AFBVV95cUxQZXFNcTVKWWlTeWVfdDA2cmFDclRTVTlIY1IzRWI2akZPaTliYi1WaEJDQ2IyVzhVRmFTQWR3ZnUwNExVcEthSnA0endZaWxDaEZFeEc0OE1iZHdvYmRvU05LTno2LW92TXlKeXV5RHlyajBfUzVibWlGM1djSzJmTlVnSnNiRWhWVzJiaVkwQmRuS3lhWk54TFFYUkUtOWVhWHRGRjRUamIyVWo3ZjBOSnpoSWZkY2x1TnpNUTZFMngtTERacUNnd0hFa1U5dk9SZEJLa0NyLXJURlEw0gHiAUFVX3lxTE42LUkwNF85NTNseGp3UVdfS1E5UzJseUZfMzJzOGJpUnhDMVJEVzk4MmFIREZzRFFqY1lTNEtCd2Jxb0lpbE1lX1YzVmp1UzdpN1B4RGdqbXpNalZCQktRZUl2dUM2VlJpazJoUGNXTjdmSjNacWZ3WlkwSkM3N3Q1eE51enJJQmw2QXQwamtHbjB3RTJlcEVYXzF2YXZhRm45THNhV0lSZGZDd1Y0OWV5Y0oxa0J4YnZQeWxzSExCd2I0QXVOMl9xS2w0TVlKMHZKbGV4XzV1bTBYNVNaVG9Bb1E?oc=5", "source": "India Today", "published_at": "Mon, 17 Aug 2026 08:36:58 GMT"}], "status": "active", "title": "Himachal man carries groom on his back as flash flood blocks wedding procession - India Today", "url": "https://news.google.com/rss/articles/CBMi3AFBVV95cUxQZXFNcTVKWWlTeWVfdDA2cmFDclRTVTlIY1IzRWI2akZPaTliYi1WaEJDQ2IyVzhVRmFTQWR3ZnUwNExVcEthSnA0endZaWxDaEZFeEc0OE1iZHdvYmRvU05LTno2LW92TXlKeXV5RHlyajBfUzVibWlGM1djSzJmTlVnSnNiRWhWVzJiaVkwQmRuS3lhWk54TFFYUkUtOWVhWHRGRjRUamIyVWo3ZjBOSnpoSWZkY2x1TnpNUTZFMngtTERacUNnd0hFa1U5dk9SZEJLa0NyLXJURlEw0gHiAUFVX3lxTE42LUkwNF85NTNseGp3UVdfS1E5UzJseUZfMzJzOGJpUnhDMVJEVzk4MmFIREZzRFFqY1lTNEtCd2Jxb0lpbE1lX1YzVmp1UzdpN1B4RGdqbXpNalZCQktRZUl2dUM2VlJpazJoUGNXTjdmSjNacWZ3WlkwSkM3N3Q1eE51enJJQmw2QXQwamtHbjB3RTJlcEVYXzF2YXZhRm45THNhV0lSZGZDd1Y0OWV5Y0oxa0J4YnZQeWxzSExCd2I0QXVOMl9xS2w0TVlKMHZKbGV4XzV1bTBYNVNaVG9Bb1E?oc=5"}, {"event_id": "DISHA-EARTHQUAKE-MAHARASHTR-20260817-BD07", "article_id": "882b9b62590f46d74b18570a0245d721cfc8b0168413aca1a63ec5a6ff4fb73a", "classification": {"model": "gemini-3.6-flash", "confidence": 0.9, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.9, "corroboration": {"source_count": 1, "sources": ["The Indian Express"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMipgFBVV95cUxNOGFEbnB3dUJJdVhHcnBiWDI2eU1jYXBNZEZ5aWFnRFltdFVIeGY0SGE4bzhkNzVJU3MxQmd2QXQtZE96TV9JeHpmRTZucy1CeDd1S0M3Ukw2MHdNVHJJYnN5clJmVEhwWHNPTTRZVGR5Vmh1d3NwVkp2aFVMaXQtb0pod1dTM3JRODEyRlViVmpPSE5mWUdqYTFGNGdqR04wTHAzaXB30gGsAUFVX3lxTFBEU295MDB5TTZkR3dFTkc0bFJkNzNraDFCNUtJMlU2TzNDX08tRGYxc3ZWdGU2M2RFODVoMGh6cDB4YllFVkxZMFRXd3FWa01DRUp1VVQ2YkoxdER3MWNqeFpsbzN3VzhVWTEwd28tWGtEOXJ5NEVxcmZTTXgxcjJRdDB2VDFfZ3UtSU5TY0d0OWliZVNQeTZRV2VVVkxURThITno1THllZGs4LV8?oc=5\" target=\"_blank\">Earthquake swarm in Maharashtra: Why state has seen 29 incidents in past 2 weeks</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">The Indian Express</font>", "disaster_type": "earthquake", "evidence": ["Earthquake swarm in Maharashtra", "state has seen 29 incidents in past 2 weeks"], "first_seen_at": "2026-08-18T19:10:24.917796+00:00", "incident_date": "2026-08-17", "last_updated_at": "2026-08-18T19:10:24.917796+00:00", "location": {"country": "India", "state": "Maharashtra", "district": null, "city": null, "latitude": 19.7515, "longitude": 75.7139, "precision": "state"}, "processed_at": "2026-08-18T19:10:24.917796+00:00", "published_at": "Mon, 17 Aug 2026 05:52:00 GMT", "reason": "An earthquake swarm with 29 incidents has occurred in Maharashtra over the past two weeks.", "severity": "medium", "source": "The Indian Express", "source_articles": [{"article_id": "882b9b62590f46d74b18570a0245d721cfc8b0168413aca1a63ec5a6ff4fb73a", "title": "Earthquake swarm in Maharashtra: Why state has seen 29 incidents in past 2 weeks - The Indian Express", "url": "https://news.google.com/rss/articles/CBMipgFBVV95cUxNOGFEbnB3dUJJdVhHcnBiWDI2eU1jYXBNZEZ5aWFnRFltdFVIeGY0SGE4bzhkNzVJU3MxQmd2QXQtZE96TV9JeHpmRTZucy1CeDd1S0M3Ukw2MHdNVHJJYnN5clJmVEhwWHNPTTRZVGR5Vmh1d3NwVkp2aFVMaXQtb0pod1dTM3JRODEyRlViVmpPSE5mWUdqYTFGNGdqR04wTHAzaXB30gGsAUFVX3lxTFBEU295MDB5TTZkR3dFTkc0bFJkNzNraDFCNUtJMlU2TzNDX08tRGYxc3ZWdGU2M2RFODVoMGh6cDB4YllFVkxZMFRXd3FWa01DRUp1VVQ2YkoxdER3MWNqeFpsbzN3VzhVWTEwd28tWGtEOXJ5NEVxcmZTTXgxcjJRdDB2VDFfZ3UtSU5TY0d0OWliZVNQeTZRV2VVVkxURThITno1THllZGs4LV8?oc=5", "source": "The Indian Express", "published_at": "Mon, 17 Aug 2026 05:52:00 GMT"}], "status": "active", "title": "Earthquake swarm in Maharashtra: Why state has seen 29 incidents in past 2 weeks - The Indian Express", "url": "https://news.google.com/rss/articles/CBMipgFBVV95cUxNOGFEbnB3dUJJdVhHcnBiWDI2eU1jYXBNZEZ5aWFnRFltdFVIeGY0SGE4bzhkNzVJU3MxQmd2QXQtZE96TV9JeHpmRTZucy1CeDd1S0M3Ukw2MHdNVHJJYnN5clJmVEhwWHNPTTRZVGR5Vmh1d3NwVkp2aFVMaXQtb0pod1dTM3JRODEyRlViVmpPSE5mWUdqYTFGNGdqR04wTHAzaXB30gGsAUFVX3lxTFBEU295MDB5TTZkR3dFTkc0bFJkNzNraDFCNUtJMlU2TzNDX08tRGYxc3ZWdGU2M2RFODVoMGh6cDB4YllFVkxZMFRXd3FWa01DRUp1VVQ2YkoxdER3MWNqeFpsbzN3VzhVWTEwd28tWGtEOXJ5NEVxcmZTTXgxcjJRdDB2VDFfZ3UtSU5TY0d0OWliZVNQeTZRV2VVVkxURThITno1THllZGs4LV8?oc=5"}, {"event_id": "DISHA-LANDSLIDE-JAMMU_AND_-20260818-C4B1", "article_id": "ca0cfa4ffd1eb0ef2054967c9675c3fb032215bd9c53e93051bc071c8b0d3c19", "classification": {"model": "gemini-3.6-flash", "confidence": 0.95, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.95, "corroboration": {"source_count": 1, "sources": ["DD India"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMiogFBVV95cUxQZm91cWNfeTZscXU2OG04N3dJRktZYUlBUi03b3N5X2Z2eFJTWGhmQW9pZURHTWZPTk1PbWVuVm5Qc1kyVFpqUGV2VjBEbWFseE5VR2FURlFySjd0VFlQZ2tBNEwyMldBbEVsLVYyRlVNNWdkRzM3WnlnOWYyOG84YXVqLVhnS2YzNGQwakM3RXg0RE1mYmVXOXE4SmJuVzZJenc?oc=5\" target=\"_blank\">Massive landslide disrupts traffic on Jammu-Srinagar National Highway</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">DD India</font>", "disaster_type": "landslide", "evidence": ["Massive landslide disrupts traffic on Jammu-Srinagar National Highway"], "first_seen_at": "2026-08-18T19:10:25.014293+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:25.014293+00:00", "location": {"country": "India", "state": "Jammu and Kashmir", "district": null, "city": null, "latitude": 33.7782, "longitude": 76.5762, "precision": "state"}, "processed_at": "2026-08-18T19:10:25.014293+00:00", "published_at": "Tue, 18 Aug 2026 06:46:07 GMT", "reason": "A massive landslide disrupted traffic on the Jammu-Srinagar National Highway.", "severity": "medium", "source": "DD India", "source_articles": [{"article_id": "ca0cfa4ffd1eb0ef2054967c9675c3fb032215bd9c53e93051bc071c8b0d3c19", "title": "Massive landslide disrupts traffic on Jammu-Srinagar National Highway - DD India", "url": "https://news.google.com/rss/articles/CBMiogFBVV95cUxQZm91cWNfeTZscXU2OG04N3dJRktZYUlBUi03b3N5X2Z2eFJTWGhmQW9pZURHTWZPTk1PbWVuVm5Qc1kyVFpqUGV2VjBEbWFseE5VR2FURlFySjd0VFlQZ2tBNEwyMldBbEVsLVYyRlVNNWdkRzM3WnlnOWYyOG84YXVqLVhnS2YzNGQwakM3RXg0RE1mYmVXOXE4SmJuVzZJenc?oc=5", "source": "DD India", "published_at": "Tue, 18 Aug 2026 06:46:07 GMT"}], "status": "active", "title": "Massive landslide disrupts traffic on Jammu-Srinagar National Highway - DD India", "url": "https://news.google.com/rss/articles/CBMiogFBVV95cUxQZm91cWNfeTZscXU2OG04N3dJRktZYUlBUi03b3N5X2Z2eFJTWGhmQW9pZURHTWZPTk1PbWVuVm5Qc1kyVFpqUGV2VjBEbWFseE5VR2FURlFySjd0VFlQZ2tBNEwyMldBbEVsLVYyRlVNNWdkRzM3WnlnOWYyOG84YXVqLVhnS2YzNGQwakM3RXg0RE1mYmVXOXE4SmJuVzZJenc?oc=5"}, {"event_id": "DISHA-FLOOD-UTTAR_PRAD-20260818-63B4", "article_id": "ea29643268dd90bcd4fb81de6fae831640c14407c885ab5e186c5f68152c8794", "classification": {"model": "gemini-3.6-flash", "confidence": 0.98, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.98, "corroboration": {"source_count": 1, "sources": ["hindustantimes.com"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMi1AFBVV95cUxNMlJweldmT3VIekFPSW11TVNuTmt4YkhVLUFLMjJQQlVibXk0UW1HNUlPQV9mZG1RZmVYWW9RZzBVNWRLOGZrdTJjQnlvM3I2ME93V2FDa2JxRTNSejZ0NEIzWi0zaGlmR2ZXY0J5cWl2MDhJM0xmYmZkWGVMSThxbW9HcU50VXpBVk5ZLUNabzNyQWNubzNjeDZhZEg1cU52R3FWbkl2Zi16MG9iWUQ4YXdhR1I4bHpjTlNCLXBXQ0R4RXNvUzJ0X3BBdEVxb3lwYUtzedIB2gFBVV95cUxNc3hGZGFmeHdZUGZzZzNKSm1WSXdYV1hvTG1UclVYTE5pbmZhRERBMWdFTGx0WHcwMmFnV2dWWGphUmNWR0k3VWxxYUVNWnFuUnlPcThreXp5dTM2cmc0R1BTV3JmLVJ4RTNndkhiZVlRbDVHX3RmU2RwUGpsemt3X3RuNWljN21fX3lpVnMyOUw2ZGhOZlJ5WGJNVEVzRDdwbms5Wm9sN083Nk1VMHhLclNwbE1ySWxXaHN4Y3k5TmZCS21KOS11bE1BWXdwTlZCMV8zYlpydElwUQ?oc=5\" target=\"_blank\">173 UP villages flood-hit; more than 4,000 people shifted to safer locations | India News</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">hindustantimes.com</font>", "disaster_type": "flood", "evidence": ["173 UP villages flood-hit", "more than 4,000 people shifted to safer locations"], "first_seen_at": "2026-08-18T19:10:25.082132+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:25.082132+00:00", "location": {"country": "India", "state": "Uttar Pradesh", "district": null, "city": null, "latitude": 26.8467, "longitude": 80.9462, "precision": "state"}, "processed_at": "2026-08-18T19:10:25.082132+00:00", "published_at": "Tue, 18 Aug 2026 18:41:40 GMT", "reason": "Severe flooding affected 173 UP villages, displacing over 4,000 residents.", "severity": "high", "source": "hindustantimes.com", "source_articles": [{"article_id": "ea29643268dd90bcd4fb81de6fae831640c14407c885ab5e186c5f68152c8794", "title": "173 UP villages flood-hit; more than 4,000 people shifted to safer locations | India News - hindustantimes.com", "url": "https://news.google.com/rss/articles/CBMi1AFBVV95cUxNMlJweldmT3VIekFPSW11TVNuTmt4YkhVLUFLMjJQQlVibXk0UW1HNUlPQV9mZG1RZmVYWW9RZzBVNWRLOGZrdTJjQnlvM3I2ME93V2FDa2JxRTNSejZ0NEIzWi0zaGlmR2ZXY0J5cWl2MDhJM0xmYmZkWGVMSThxbW9HcU50VXpBVk5ZLUNabzNyQWNubzNjeDZhZEg1cU52R3FWbkl2Zi16MG9iWUQ4YXdhR1I4bHpjTlNCLXBXQ0R4RXNvUzJ0X3BBdEVxb3lwYUtzedIB2gFBVV95cUxNc3hGZGFmeHdZUGZzZzNKSm1WSXdYV1hvTG1UclVYTE5pbmZhRERBMWdFTGx0WHcwMmFnV2dWWGphUmNWR0k3VWxxYUVNWnFuUnlPcThreXp5dTM2cmc0R1BTV3JmLVJ4RTNndkhiZVlRbDVHX3RmU2RwUGpsemt3X3RuNWljN21fX3lpVnMyOUw2ZGhOZlJ5WGJNVEVzRDdwbms5Wm9sN083Nk1VMHhLclNwbE1ySWxXaHN4Y3k5TmZCS21KOS11bE1BWXdwTlZCMV8zYlpydElwUQ?oc=5", "source": "hindustantimes.com", "published_at": "Tue, 18 Aug 2026 18:41:40 GMT"}], "status": "active", "title": "173 UP villages flood-hit; more than 4,000 people shifted to safer locations | India News - hindustantimes.com", "url": "https://news.google.com/rss/articles/CBMi1AFBVV95cUxNMlJweldmT3VIekFPSW11TVNuTmt4YkhVLUFLMjJQQlVibXk0UW1HNUlPQV9mZG1RZmVYWW9RZzBVNWRLOGZrdTJjQnlvM3I2ME93V2FDa2JxRTNSejZ0NEIzWi0zaGlmR2ZXY0J5cWl2MDhJM0xmYmZkWGVMSThxbW9HcU50VXpBVk5ZLUNabzNyQWNubzNjeDZhZEg1cU52R3FWbkl2Zi16MG9iWUQ4YXdhR1I4bHpjTlNCLXBXQ0R4RXNvUzJ0X3BBdEVxb3lwYUtzedIB2gFBVV95cUxNc3hGZGFmeHdZUGZzZzNKSm1WSXdYV1hvTG1UclVYTE5pbmZhRERBMWdFTGx0WHcwMmFnV2dWWGphUmNWR0k3VWxxYUVNWnFuUnlPcThreXp5dTM2cmc0R1BTV3JmLVJ4RTNndkhiZVlRbDVHX3RmU2RwUGpsemt3X3RuNWljN21fX3lpVnMyOUw2ZGhOZlJ5WGJNVEVzRDdwbms5Wm9sN083Nk1VMHhLclNwbE1ySWxXaHN4Y3k5TmZCS21KOS11bE1BWXdwTlZCMV8zYlpydElwUQ?oc=5"}, {"event_id": "DISHA-LANDSLIDE-INDIA-20260818-1414", "article_id": "6421684b319c01eab2182ad6abaa59e26ebb174628536eca0a7d0caa6cb08434", "classification": {"model": "gemini-3.6-flash", "confidence": 0.92, "tier": "high", "article_type": "CURRENT_INCIDENT"}, "confidence": 0.92, "corroboration": {"source_count": 1, "sources": ["Gulf Daily News (Bahrain)"]}, "description": "<a href=\"https://news.google.com/rss/articles/CBMiU0FVX3lxTFBBa0gydllWQ1ZtWHpsMHVDOXJ1Ry1yYTZONHJYRkIwY3NpQWF1NUN1ZjNELXBodC13S1hEdmxxNzZ3bEZYMVY1UzhyaEppM1VObXZR?oc=5\" target=\"_blank\">Biker miraculously escapes landslide debris in India</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">Gulf Daily News (Bahrain)</font>", "disaster_type": "landslide", "evidence": ["Biker miraculously escapes landslide debris in India"], "first_seen_at": "2026-08-18T19:10:25.117721+00:00", "incident_date": "2026-08-18", "last_updated_at": "2026-08-18T19:10:25.117721+00:00", "location": {"country": "India", "state": null, "district": null, "city": null, "latitude": 20.5937, "longitude": 78.9629, "precision": "country"}, "processed_at": "2026-08-18T19:10:25.117721+00:00", "published_at": "Tue, 18 Aug 2026 14:02:57 GMT", "reason": "A biker narrowly escaped landslide debris in India during a active slope collapse event.", "severity": "low", "source": "Gulf Daily News (Bahrain)", "source_articles": [{"article_id": "6421684b319c01eab2182ad6abaa59e26ebb174628536eca0a7d0caa6cb08434", "title": "Biker miraculously escapes landslide debris in India - Gulf Daily News (Bahrain)", "url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTFBBa0gydllWQ1ZtWHpsMHVDOXJ1Ry1yYTZONHJYRkIwY3NpQWF1NUN1ZjNELXBodC13S1hEdmxxNzZ3bEZYMVY1UzhyaEppM1VObXZR?oc=5", "source": "Gulf Daily News (Bahrain)", "published_at": "Tue, 18 Aug 2026 14:02:57 GMT"}], "status": "active", "title": "Biker miraculously escapes landslide debris in India - Gulf Daily News (Bahrain)", "url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTFBBa0gydllWQ1ZtWHpsMHVDOXJ1Ry1yYTZONHJYRkIwY3NpQWF1NUN1ZjNELXBodC13S1hEdmxxNzZ3bEZYMVY1UzhyaEppM1VObXZR?oc=5"}];
+        
+        // Initialize Map centered on India
+        const map = L.map('map', {
+            center: [22.5937, 78.9629],
+            zoom: 5,
+            zoomControl: true
+        });
+
+        // Dark Theme Tile Layer
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://carto.com/">CARTO</a> | DISHA Intelligence',
+            maxZoom: 18,
+            subdomains: 'abcd'
+        }).addTo(map);
+
+        const markerClusterGroup = L.markerClusterGroup({
+            chunkedLoading: true,
+            maxClusterRadius: 35,
+            spiderfyOnMaxZoom: true,
+            showCoverageOnHover: false
+        });
+        map.addLayer(markerClusterGroup);
+
+        const markersMap = new Map();
+
+        // Helper: Get color by severity
+        function getSeverityColor(sev) {
+            switch ((sev || '').toLowerCase()) {
+                case 'critical': return '#ef4444';
+                case 'high': return '#f97316';
+                case 'medium': return '#eab308';
+                case 'low': return '#10b981';
+                default: return '#3b82f6';
+            }
+        }
+
+        // Populate Types Dropdown
+        const typesSet = new Set();
+        const statesSet = new Set();
+        let criticalCount = 0;
+
+        eventsData.forEach(ev => {
+            if (ev.disaster_type) typesSet.add(ev.disaster_type);
+            if (ev.location && ev.location.state) statesSet.add(ev.location.state);
+            const sev = (ev.severity || '').toLowerCase();
+            if (sev === 'critical' || sev === 'high') criticalCount++;
+        });
+
+        document.getElementById('stat-total').innerText = eventsData.length;
+        document.getElementById('stat-critical').innerText = criticalCount;
+        document.getElementById('stat-states').innerText = statesSet.size;
+
+        const typeSelect = document.getElementById('typeFilter');
+        typesSet.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t;
+            opt.innerText = t.replace('_', ' ').toUpperCase();
+            typeSelect.appendChild(opt);
+        });
+
+        // Render Markers
+        function renderMarkers(filteredEvents) {
+            markerClusterGroup.clearLayers();
+            markersMap.clear();
+
+            filteredEvents.forEach(ev => {
+                const lat = ev.location?.latitude;
+                const lon = ev.location?.longitude;
+                if (!lat || !lon) return;
+
+                const color = getSeverityColor(ev.severity);
+                
+                const customIcon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div class="custom-pin" style="background-color: ${color}; width: 16px; height: 16px;"></div>`,
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8]
+                });
+
+                const marker = L.marker([lat, lon], { icon: customIcon });
+
+                const evidenceListHtml = (ev.evidence || [])
+                    .slice(0, 3)
+                    .map(e => `<li>${e}</li>`)
+                    .join('');
+
+                const popupHtml = `
+                    <div class="popup-content">
+                        <div class="popup-header">
+                            <span class="type-badge">${ev.disaster_type?.toUpperCase() || 'DISASTER'}</span>
+                            <span class="sev-badge sev-${ev.severity || 'unknown'}">${ev.severity?.toUpperCase() || 'UNKNOWN'}</span>
+                        </div>
+                        <div class="popup-title">${ev.title || 'Disaster Incident'}</div>
+                        ${ev.reason ? `<div class="popup-reason">${ev.reason}</div>` : ''}
+                        ${evidenceListHtml ? `
+                            <div class="popup-evidence-title">Verified Observations:</div>
+                            <ul class="popup-evidence-list">${evidenceListHtml}</ul>
+                        ` : ''}
+                        <div class="popup-footer">
+                            <span>📍 ${ev.location?.city ? ev.location.city + ', ' : ''}${ev.location?.state || 'India'}</span>
+                            ${ev.url ? `<a href="${ev.url}" target="_blank" class="popup-link">Source Article ↗</a>` : ''}
+                        </div>
+                    </div>
+                `;
+
+                marker.bindPopup(popupHtml);
+                markerClusterGroup.addLayer(marker);
+                markersMap.set(ev.event_id || ev.article_id, marker);
+            });
+        }
+
+        // Render Sidebar Cards
+        function renderSidebarCards(filteredEvents) {
+            const listEl = document.getElementById('eventsList');
+            listEl.innerHTML = '';
+
+            if (filteredEvents.length === 0) {
+                listEl.innerHTML = '<div style="color: var(--text-muted); text-align: center; margin-top: 40px;">No matching disaster events found.</div>';
+                return;
+            }
+
+            filteredEvents.forEach(ev => {
+                const card = document.createElement('div');
+                card.className = 'event-card';
+                
+                const locStr = [ev.location?.district || ev.location?.city, ev.location?.state].filter(Boolean).join(', ') || 'India';
+                const dateStr = ev.incident_date || (ev.published_at ? ev.published_at.substring(0, 16) : 'Recent');
+
+                card.innerHTML = `
+                    <div class="card-top">
+                        <span class="type-badge">${ev.disaster_type?.toUpperCase() || 'EVENT'}</span>
+                        <span class="sev-badge sev-${ev.severity || 'unknown'}">${ev.severity?.toUpperCase() || 'UNKNOWN'}</span>
+                    </div>
+                    <div class="card-title">${ev.title || 'Disaster Alert'}</div>
+                    <div class="card-meta">
+                        <span>📍 ${locStr}</span>
+                        <span>📅 ${dateStr}</span>
+                    </div>
+                `;
+
+                card.onclick = () => {
+                    const m = markersMap.get(ev.event_id || ev.article_id);
+                    if (m && ev.location?.latitude && ev.location?.longitude) {
+                        map.flyTo([ev.location.latitude, ev.location.longitude], 10, { duration: 1.2 });
+                        markerClusterGroup.zoomToShowLayer(m, () => {
+                            m.openPopup();
+                        });
+                    }
+                };
+
+                listEl.appendChild(card);
+            });
+        }
+
+        // Filtering Logic
+        function applyFilters() {
+            const searchVal = document.getElementById('searchInput').value.toLowerCase().trim();
+            const typeVal = document.getElementById('typeFilter').value;
+            const sevVal = document.getElementById('severityFilter').value;
+
+            const filtered = eventsData.filter(ev => {
+                if (typeVal !== 'all' && ev.disaster_type !== typeVal) return false;
+                if (sevVal !== 'all' && (ev.severity || '').toLowerCase() !== sevVal) return false;
+
+                if (searchVal) {
+                    const titleMatch = (ev.title || '').toLowerCase().includes(searchVal);
+                    const stateMatch = (ev.location?.state || '').toLowerCase().includes(searchVal);
+                    const cityMatch = (ev.location?.city || '').toLowerCase().includes(searchVal);
+                    const distMatch = (ev.location?.district || '').toLowerCase().includes(searchVal);
+                    const reasonMatch = (ev.reason || '').toLowerCase().includes(searchVal);
+                    if (!titleMatch && !stateMatch && !cityMatch && !distMatch && !reasonMatch) return false;
+                }
+
+                return true;
+            });
+
+            renderMarkers(filtered);
+            renderSidebarCards(filtered);
+        }
+
+        document.getElementById('searchInput').addEventListener('input', applyFilters);
+        document.getElementById('typeFilter').addEventListener('change', applyFilters);
+        document.getElementById('severityFilter').addEventListener('change', applyFilters);
+
+        // Initial Load
+        renderMarkers(eventsData);
+        renderSidebarCards(eventsData);
+    </script>
+</body>
+</html>

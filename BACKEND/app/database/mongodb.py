@@ -27,7 +27,8 @@ client = MongoClient(
 
 def init_db_indexes(database):
     """
-    Creates recommended single and compound indexes for fast query resolution and deduplication.
+    Creates recommended single and compound indexes for fast query resolution,
+    pending AI queue handling, and event deduplication.
     """
     try:
         # disaster_events collection
@@ -35,16 +36,20 @@ def init_db_indexes(database):
         database["disaster_events"].create_index([("article_id", ASCENDING)], background=True)
         database["disaster_events"].create_index([("status", ASCENDING), ("disaster_type", ASCENDING)], background=True)
         database["disaster_events"].create_index([("location.state", ASCENDING)], background=True)
+        database["disaster_events"].create_index([("location.district", ASCENDING)], background=True)
         database["disaster_events"].create_index([("location.city", ASCENDING)], background=True)
+        database["disaster_events"].create_index([("incident_date", DESCENDING)], background=True)
         database["disaster_events"].create_index([("processed_at", DESCENDING)], background=True)
         database["disaster_events"].create_index([("last_updated_at", DESCENDING)], background=True)
 
         # rejected_news collection
         database["rejected_news"].create_index([("article_id", ASCENDING)], background=True)
         database["rejected_news"].create_index([("stage", ASCENDING), ("processed_at", DESCENDING)], background=True)
+        database["rejected_news"].create_index([("stage", ASCENDING), ("reason", ASCENDING)], background=True)
 
         # news_temp collection
-        database["news_temp"].create_index([("status", ASCENDING)], background=True)
+        database["news_temp"].create_index([("status", ASCENDING), ("retry_count", ASCENDING)], background=True)
+        database["news_temp"].create_index([("status", ASCENDING), ("candidate_priority_score", DESCENDING)], background=True)
         database["news_temp"].create_index([("fetched_at", DESCENDING)], background=True)
 
         print("[MongoDB] Indexes initialized successfully")
@@ -60,4 +65,4 @@ try:
 
 except ConnectionFailure as e:
     print(f"[MongoDB] Connection failed: {e}")
-    db = client[MONGO_DB]
+    db = client[MONGO_DB]
