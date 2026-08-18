@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -8,6 +9,9 @@ from pymongo.errors import ConnectionFailure, PyMongoError
 # Search .env in current directory and backend root
 _current_dir = Path(__file__).resolve().parent
 _backend_dir = _current_dir.parent.parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
 load_dotenv(_backend_dir / ".env")
 load_dotenv()
 

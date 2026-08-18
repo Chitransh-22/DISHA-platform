@@ -471,7 +471,19 @@ class TestRISEQPipeline(unittest.TestCase):
         self.assertIn("total_events_30d", stats_data)
         self.assertIn("by_relevance", stats_data)
 
-        # 5. Non-existent earthquake detail
+        # 5. Trigger fetch in background with mocked pipeline
+        with patch("app.routes.earthquakes.sync_earthquakes_pipeline") as mock_sync:
+            mock_sync.return_value = {"status": "success", "new_count": 0}
+            fetch_resp = client.post("/api/earthquakes/fetch")
+            self.assertEqual(fetch_resp.status_code, 200)
+            fetch_data = fetch_resp.json()
+            self.assertEqual(fetch_data["status"], "started")
+
+            # 6. Trigger sync route
+            sync_resp = client.post("/api/earthquakes/sync")
+            self.assertEqual(sync_resp.status_code, 200)
+
+        # 7. Non-existent earthquake detail
         not_found_resp = client.get("/api/earthquakes/non_existent_event_id_123")
         self.assertEqual(not_found_resp.status_code, 404)
 

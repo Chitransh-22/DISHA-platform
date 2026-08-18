@@ -12,12 +12,16 @@ from pathlib import Path
 from urllib.parse import quote, urlparse, parse_qs, urlunparse
 from typing import List, Dict, Any, Optional, Tuple, Set
 
+import sys
 import feedparser
 import requests
 from dotenv import load_dotenv
 
-# Ensure .env is loaded
+# Ensure .env is loaded and backend directory in sys.path for direct CLI execution
 _backend_dir = Path(__file__).resolve().parent.parent.parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
 load_dotenv(_backend_dir / ".env")
 load_dotenv()
 
@@ -1046,3 +1050,7 @@ def fetch_gnews() -> dict:
 
 # Alias for backward compatibility
 run_news_pipeline = fetch_gnews
+
+
+if __name__ == "__main__":
+    fetch_gnews()

@@ -8,12 +8,24 @@ and geographic India relevance classification.
 """
 
 import os
+import sys
 import re
 import time
 import logging
 import urllib3
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Tuple
+
+from dotenv import load_dotenv
+
+# Ensure .env is loaded and backend directory in sys.path for direct CLI execution
+_backend_dir = Path(__file__).resolve().parent.parent.parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
+load_dotenv(_backend_dir / ".env")
+load_dotenv()
 
 import requests
 from bs4 import BeautifulSoup

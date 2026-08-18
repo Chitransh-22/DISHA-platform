@@ -1,4 +1,15 @@
+import sys
+from pathlib import Path
 from typing import Optional
+
+# Ensure backend root is always in sys.path regardless of execution directory
+_backend_dir = Path(__file__).resolve().parent.parent.parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
+from dotenv import load_dotenv
+load_dotenv(_backend_dir / ".env")
+load_dotenv()
 
 from fastapi import APIRouter, BackgroundTasks, Query
 

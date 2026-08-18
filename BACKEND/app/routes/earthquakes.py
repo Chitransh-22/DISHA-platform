@@ -1,9 +1,15 @@
-"""
-DISHA Platform - NCS RISEQ Earthquake API Endpoints
-Provides endpoints for retrieving, filtering, and manually synchronizing rolling 30-day earthquake data.
-"""
-
+import sys
+from pathlib import Path
 from typing import Optional
+
+# Ensure backend root is always in sys.path regardless of execution directory
+_backend_dir = Path(__file__).resolve().parent.parent.parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
+from dotenv import load_dotenv
+load_dotenv(_backend_dir / ".env")
+load_dotenv()
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 
@@ -100,8 +106,9 @@ async def earthquake_stats():
     return get_earthquake_statistics()
 
 
+@router.post("/fetch", summary="Trigger real-time NCS RISEQ earthquake fetching in background")
 @router.post("/sync", summary="Trigger manual NCS RISEQ pipeline synchronization")
-async def sync_earthquakes_route(
+async def fetch_earthquakes_route(
     background_tasks: BackgroundTasks,
     background: bool = Query(
         True,
@@ -109,13 +116,14 @@ async def sync_earthquakes_route(
     ),
 ):
     """
-    Manually triggers the NCS RISEQ earthquake ingestion and deduplication pipeline.
+    Trigger the official NCS RISEQ earthquake fetching, normalization, and deduplication pipeline.
+    Identical in behavior and convention to POST /api/news/fetch.
     """
     if background:
         background_tasks.add_task(sync_earthquakes_pipeline)
         return {
             "status": "started",
-            "message": "NCS RISEQ earthquake ingestion started in background",
+            "message": "NCS RISEQ earthquake fetching started in background",
         }
     else:
         summary = sync_earthquakes_pipeline()

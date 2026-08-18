@@ -4,11 +4,24 @@ Manages synchronization, deduplication, rolling 30-day retention, database upser
 and querying for NCS RISEQ earthquakes.
 """
 
+import os
+import sys
 import logging
 import threading
 import time
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Tuple
+
+from dotenv import load_dotenv
+
+# Ensure .env is loaded and backend directory in sys.path for direct CLI execution
+_backend_dir = Path(__file__).resolve().parent.parent.parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
+load_dotenv(_backend_dir / ".env")
+load_dotenv()
 
 from pymongo.collection import Collection
 from pymongo.errors import PyMongoError, DuplicateKeyError
@@ -486,3 +499,7 @@ def get_earthquake_statistics(col: Optional[Collection] = None) -> Dict[str, Any
         "sync_status": get_last_sync_metrics(),
         "generated_at": now_utc.isoformat(),
     }
+
+
+if __name__ == "__main__":
+    sync_earthquakes_pipeline()
