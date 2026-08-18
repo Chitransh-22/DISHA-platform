@@ -11,7 +11,20 @@ _backend_dir = Path(__file__).resolve().parent
 load_dotenv(_backend_dir / ".env")
 load_dotenv()
 
+from contextlib import asynccontextmanager
 from app.routes.gnews import router as news_router
+from app.routes.earthquakes import router as earthquakes_router
+from app.services.earthquake_scheduler import start_earthquake_scheduler, stop_earthquake_scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start periodic earthquake scheduler
+    start_earthquake_scheduler()
+    yield
+    # Shutdown: Stop scheduler
+    stop_earthquake_scheduler()
+
 
 app = FastAPI(
     title="DISHA Backend API",
@@ -19,6 +32,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # Allow CORS for frontend integration
@@ -40,6 +54,7 @@ app.add_middleware(
 
 # Register routes
 app.include_router(news_router)
+app.include_router(earthquakes_router)
 
 
 @app.get("/", tags=["General"])

@@ -52,6 +52,18 @@ def init_db_indexes(database):
         database["news_temp"].create_index([("status", ASCENDING), ("candidate_priority_score", DESCENDING)], background=True)
         database["news_temp"].create_index([("fetched_at", DESCENDING)], background=True)
 
+        # earthquakes collection (NCS RISEQ ingestion)
+        database["earthquakes"].create_index([("event_id", ASCENDING)], unique=True, background=True)
+        database["earthquakes"].create_index([("origin_time", DESCENDING)], background=True)
+        database["earthquakes"].create_index([("magnitude", DESCENDING)], background=True)
+        database["earthquakes"].create_index([("relevance", ASCENDING)], background=True)
+        database["earthquakes"].create_index([("source", ASCENDING)], background=True)
+        database["earthquakes"].create_index([("event_type", ASCENDING)], background=True)
+        database["earthquakes"].create_index([("status", ASCENDING)], background=True)
+        database["earthquakes"].create_index([("region", ASCENDING)], background=True)
+        database["earthquakes"].create_index([("created_at", DESCENDING)], background=True)
+        database["earthquakes"].create_index([("last_seen_at", DESCENDING)], background=True)
+
         print("[MongoDB] Indexes initialized successfully")
     except PyMongoError as err:
         print(f"[MongoDB] Index initialization notice: {err}")
