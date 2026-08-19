@@ -1,0 +1,6 @@
+{
+  "name": "DISHA - Disaster Intelligence & Hazard Awareness",
+  "description": "Disaster intelligence and situational hazard awareness platform for real-time tracking, incident reporting, and hazard response across India.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
