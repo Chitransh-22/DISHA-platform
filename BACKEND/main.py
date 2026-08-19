@@ -14,6 +14,7 @@ load_dotenv()
 from app.routes.gnews import router as news_router
 from app.routes.earthquakes import router as earthquakes_router
 from app.routes.sachet import router as sachet_router
+from app.routes.emergency_services import router as emergency_services_router
 
 app = FastAPI(
     title="DISHA Backend API",
@@ -44,6 +45,7 @@ app.add_middleware(
 app.include_router(news_router)
 app.include_router(earthquakes_router)
 app.include_router(sachet_router)
+app.include_router(emergency_services_router)
 
 
 @app.get("/", tags=["General"])
