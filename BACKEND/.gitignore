@@ -1,3 +1,39 @@
-env/
-*.pyc
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python Bytecode & Cache
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Package distributions
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Testing & Coverage
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Logs & Diagnostics
+*.log
+logs/
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
