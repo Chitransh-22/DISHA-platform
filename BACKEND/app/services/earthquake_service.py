@@ -297,14 +297,11 @@ def sync_earthquakes_pipeline(
             "last_run_metrics": summary,
         }
 
-        # Optionally record execution log in database
+        # Auto-refresh map UI if available
         try:
-            pipeline_runs_collection.insert_one({
-                "pipeline": "NCS_RISEQ_EARTHQUAKES",
-                "ran_at": now_iso,
-                "duration_seconds": duration,
-                "metrics": summary,
-            })
+            from tests.generate_temp_map_ui import generate_map
+            generate_map(open_browser=False)
+            logger.info("[DISHA MAP] Synchronized latest earthquake events to map UI.")
         except Exception:
             pass
 

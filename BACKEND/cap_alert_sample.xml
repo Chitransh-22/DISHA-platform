@@ -1,0 +1,38 @@
+<cap:alert xmlns:cap="urn:oasis:names:tc:emergency:cap:1.2">
+<cap:identifier>IN-1787111448985010_10</cap:identifier>
+<cap:sender>Assam-SDMA</cap:sender>
+<cap:sent>2026-08-19T09:38:00+05:30</cap:sent>
+<cap:status>Actual</cap:status>
+<cap:msgType>Update</cap:msgType>
+<cap:scope>Public</cap:scope>
+<cap:restriction/>
+<cap:addresses/>
+<cap:note/>
+<cap:references>CWC,IN-1787111448985010_5,2026-08-19T09:20:32+05:30</cap:references>
+<cap:incidents/>
+<cap:info>
+<cap:language>en-IN</cap:language>
+<cap:category>Met</cap:category>
+<cap:event>Flood</cap:event>
+<cap:urgency>Future</cap:urgency>
+<cap:severity>Moderate</cap:severity>
+<cap:certainty>Likely</cap:certainty>
+<cap:audience>1</cap:audience>
+<cap:effective>2026-08-19T09:00:00+05:30</cap:effective>
+<cap:onset>2026-08-19T09:38:00+05:30</cap:onset>
+<cap:expires>2026-08-19T21:00:00+05:30</cap:expires>
+<cap:headline>Due to continuous increase of water level of River Ranganadi at N H Crossing Ranganadi in Lakhimpur district of Assam, Citizens are advised to stay away from the river. Issued in Public Interest by ASDMA.</cap:headline>
+<cap:description>River Ranganadi at N H Crossing Ranganadi in Lakhimpur district of Assam continues to flow in above normal flood situation at 9:00 am today. At 9:00 am, it was flowing at a level of 93.9 m with rising trend which is 0.48 m above its Warning Level of 93.42 m and 0.52 m below its Danger Level of 94.42 m.</cap:description>
+<cap:instruction/>
+<cap:contact/>
+<cap:parameter>
+<cap:valueName>Polygon URL</cap:valueName>
+<cap:value>https://sachet.ndma.gov.in/cap_public_website/FetchPolygonXMLFile?identifier=1787111448985010</cap:value>
+</cap:parameter>
+<cap:area>
+<cap:areaDesc>Ranganadi, N H Crossing Ranganadi, Lakhimpur, Assam</cap:areaDesc>
+<cap:altitude>27.2</cap:altitude>
+<cap:ceiling>94.05</cap:ceiling>
+</cap:area>
+</cap:info>
+</cap:alert>

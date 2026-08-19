@@ -15,12 +15,25 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 import requests
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
 GEMINI_RPM_LIMIT = int(os.getenv("GEMINI_RPM_LIMIT", "12"))
 DAILY_REQUEST_LIMIT = int(os.getenv("DAILY_REQUEST_LIMIT", "450"))
 GEMINI_BATCH_SIZE = int(os.getenv("GEMINI_BATCH_SIZE", "10"))
 GEMINI_CONNECT_TIMEOUT = float(os.getenv("GEMINI_CONNECT_TIMEOUT", "15"))
-GEMINI_READ_TIMEOUT = float(os.getenv("GEMINI_READ_TIMEOUT", "120"))
+GEMINI_READ_TIMEOUT = float(os.getenv("GEMINI_READ_TIMEOUT", "60"))
+
+# Candidate fallback models in case the primary model suffers rate limiting, 503 spikes, or read timeouts
+FALLBACK_MODELS = [
+    m for m in [
+        GEMINI_MODEL,
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+    ]
+    if m
+]
+# Remove duplicates while preserving order
+FALLBACK_MODELS = list(dict.fromkeys(FALLBACK_MODELS))
 
 GEMINI_SYSTEM_PROMPT = """You are the DISHA Real-Time Disaster Intelligence Classifier for India.
 Your mission is high-precision verification of physical disaster and emergency incidents in India.
@@ -154,16 +167,12 @@ class QuotaController:
 def call_gemini_api(payload: Dict[str, Any], max_retries: int = 3) -> Optional[str]:
     """
     Sends request to Gemini REST endpoint with separate connect/read timeouts,
-    fine-grained error classification, and exponential backoff with jitter.
+    automatic model fallback across active Gemini models, fine-grained error classification,
+    and exponential backoff with jitter.
     """
     if not GEMINI_API_KEY:
         print("[GEMINI WARNING] GEMINI_API_KEY is not configured.")
         return None
-
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    )
 
     request_body = {
         "system_instruction": {
@@ -185,6 +194,15 @@ def call_gemini_api(payload: Dict[str, Any], max_retries: int = 3) -> Optional[s
     timeouts = (GEMINI_CONNECT_TIMEOUT, GEMINI_READ_TIMEOUT)
 
     for attempt in range(1, max_retries + 1):
+        # Select model (switch to fallback models on subsequent attempts if needed)
+        model_index = min(attempt - 1, len(FALLBACK_MODELS) - 1)
+        active_model = FALLBACK_MODELS[model_index]
+
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{active_model}:generateContent?key={GEMINI_API_KEY}"
+        )
+
         # Calculate exponential backoff with randomized jitter
         jitter = random.uniform(0.5, 1.5)
         backoff_sec = (2.0 ** attempt) + jitter
@@ -213,26 +231,26 @@ def call_gemini_api(payload: Dict[str, Any], max_retries: int = 3) -> Optional[s
                 return raw_text
 
             if response.status_code == 503:
-                print(f"[GEMINI HTTP 503] Attempt {attempt}/{max_retries}: Service Unavailable (Overloaded). Backing off {backoff_sec:.2f}s...")
+                print(f"[GEMINI HTTP 503] [{active_model}] Attempt {attempt}/{max_retries}: Service Unavailable (Overloaded). Backing off {backoff_sec:.2f}s...")
                 time.sleep(backoff_sec)
                 continue
 
             if response.status_code == 429:
-                rate_backoff = max(5.0, (2.0 ** attempt) + random.uniform(1.0, 3.0))
-                print(f"[GEMINI RATE LIMIT] Attempt {attempt}/{max_retries}: Rate limit reached. Backing off {rate_backoff:.2f}s...")
+                rate_backoff = max(3.0, (1.5 ** attempt) + random.uniform(0.5, 2.0))
+                print(f"[GEMINI RATE LIMIT] [{active_model}] Attempt {attempt}/{max_retries}: Rate limit/quota reached. Trying fallback model after {rate_backoff:.2f}s...")
                 time.sleep(rate_backoff)
                 continue
 
             if response.status_code in (500, 502, 504):
-                print(f"[GEMINI HTTP {response.status_code}] Attempt {attempt}/{max_retries}: Server error. Backing off {backoff_sec:.2f}s...")
+                print(f"[GEMINI HTTP {response.status_code}] [{active_model}] Attempt {attempt}/{max_retries}: Server error. Backing off {backoff_sec:.2f}s...")
                 time.sleep(backoff_sec)
                 continue
 
-            print(f"[GEMINI INVALID RESPONSE] HTTP {response.status_code}: {response.text[:250]}")
+            print(f"[GEMINI INVALID RESPONSE] [{active_model}] HTTP {response.status_code}: {response.text[:250]}")
             return None
 
         except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException, TimeoutError) as net_err:
-            print(f"[GEMINI NETWORK ERROR] Attempt {attempt}/{max_retries}: {type(net_err).__name__} - {net_err}. Backing off {backoff_sec:.2f}s...")
+            print(f"[GEMINI NETWORK ERROR] [{active_model}] Attempt {attempt}/{max_retries}: {type(net_err).__name__} - {net_err}. Backing off {backoff_sec:.2f}s...")
             time.sleep(backoff_sec)
 
     return None

@@ -1022,6 +1022,14 @@ def fetch_gnews() -> dict:
     print(f"Duration:                   {duration:.2f}s")
     print("=" * 75 + "\n")
 
+    # Auto-refresh map UI if available
+    try:
+        from tests.generate_temp_map_ui import generate_map
+        generate_map(open_browser=False)
+        print("[DISHA MAP] Synchronized latest events to map UI.\n")
+    except Exception:
+        pass
+
     return {
         "status": "success",
         "articles_fetched": total_raw,

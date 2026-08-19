@@ -26,7 +26,7 @@ logger = logging.getLogger("disha.scheduler.riseq")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-RISEQ_ENABLED = os.getenv("RISEQ_ENABLED", "true").lower() in ("true", "1", "yes")
+RISEQ_ENABLED = os.getenv("RISEQ_ENABLED", "false").lower() in ("true", "1", "yes")
 RISEQ_SYNC_INTERVAL = int(os.getenv("RISEQ_SYNC_INTERVAL", "300"))  # Default: 300 seconds (5 minutes)
 RISEQ_INITIAL_DELAY = int(os.getenv("RISEQ_INITIAL_DELAY", "5"))   # 5s startup delay
 

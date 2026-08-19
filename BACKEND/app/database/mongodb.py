@@ -68,6 +68,32 @@ def init_db_indexes(database):
         database["earthquakes"].create_index([("created_at", DESCENDING)], background=True)
         database["earthquakes"].create_index([("last_seen_at", DESCENDING)], background=True)
 
+        # sachet_alerts collection (NDMA SACHET CAP Ingestion)
+        database["sachet_alerts"].create_index([("event_id", ASCENDING)], unique=True, background=True)
+        database["sachet_alerts"].create_index([("alert_id", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("guid", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("event_time", DESCENDING)], background=True)
+        database["sachet_alerts"].create_index([("effective_at", DESCENDING)], background=True)
+        database["sachet_alerts"].create_index([("expires_at", DESCENDING)], background=True)
+        database["sachet_alerts"].create_index([("sent_at", DESCENDING)], background=True)
+        database["sachet_alerts"].create_index([("severity", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("urgency", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("certainty", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("disaster_type", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("source", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("event_type", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("status", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("message_type", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("location.state", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("location.district", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("is_active", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("is_cancelled", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("created_at", DESCENDING)], background=True)
+        database["sachet_alerts"].create_index([("last_seen_at", DESCENDING)], background=True)
+
+        # sync_state collection for ETag and last-modified caching
+        database["sync_state"].create_index([("pipeline", ASCENDING)], unique=True, background=True)
+
         print("[MongoDB] Indexes initialized successfully")
     except PyMongoError as err:
         print(f"[MongoDB] Index initialization notice: {err}")
