@@ -17,7 +17,7 @@ export const RealisticIndiaMap = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-135 sm:h-160 lg:h-185 overflow-hidden rounded-2xl bg-gradient-to-b from-[#96badb] to-[#8aaecf] select-none flex items-center justify-center ${
+      className={`relative w-full h-135 sm:h-160 lg:h-185 overflow-hidden rounded-2xl bg-linear-to-b from-[#96badb] to-[#8aaecf] select-none flex items-center justify-center ${
         zoomLevel > 1 ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default'
       }`}
       onMouseDown={onMouseDown}
@@ -29,7 +29,7 @@ export const RealisticIndiaMap = ({
       onTouchEnd={onTouchEnd}
     >
       {/* Subtle GIS Grid Texture over Map Canvas */}
-      <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:24px_24px] opacity-25 pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1px,transparent_1px)] bg-size-[24px_24px] opacity-25 pointer-events-none" />
 
       {/* Scalable & Pannable Map Image Container */}
       <div
