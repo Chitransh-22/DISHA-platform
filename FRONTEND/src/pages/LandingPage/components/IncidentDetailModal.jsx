@@ -113,11 +113,11 @@ export const IncidentDetailModal = ({ incident, onClose }) => {
               <Phone className="w-4 h-4 text-red-600" />
               <div>
                 <p className="text-[11px] font-semibold text-red-700 uppercase">Emergency Helpline</p>
-                <p className="text-xs sm:text-sm font-bold text-red-950 font-mono">{incident.helpline}</p>
+                <p className="text-xs sm:text-sm font-bold text-red-950 font-mono">{incident.helpline || '1070 / 112'}</p>
               </div>
             </div>
             <a
-              href={`tel:${incident.helpline.split('/')[0].trim()}`}
+              href={`tel:${(incident.helpline || '1070').split('/')[0].trim()}`}
               className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm"
             >
               Call Helpline
