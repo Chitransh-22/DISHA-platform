@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileWarning, MapPin, ArrowRight, ShieldAlert, Navigation } from 'lucide-react';
+import { FileWarning, MapPin, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 // Container stagger configuration
@@ -8,23 +8,23 @@ const containerVariants = {
   visible: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.1,
+      staggerChildren: 0.15, // Smooth interval between card pop-ups
     },
   },
 };
 
-// Smooth pop-up variant
+// Box Pop-Up (Scale & Spring) animation variant
 const popUpCardVariants = {
   hidden: { 
     opacity: 0, 
-    y: 20, 
+    scale: 0.85, 
   },
   visible: {
-    opacity: 1, 
-    y: 0,
+    opacity: 1,
+    scale: 1,
     transition: {
-      duration: 0.5,
-      ease: [0.16, 1, 0.3, 1],
+      duration: 2, // Increases pop-up duration to 1.2 seconds (increase further to slow down more)
+      ease: [0.6, 1, 0.3, 1], // Keeps the pop smooth without snapping
     },
   },
 };
@@ -37,55 +37,50 @@ export const BottomActionCards = ({ onNavigate }) => {
         variants={containerVariants}
         initial="hidden"
         whileInView="visible"
-        viewport={{ once: true, amount: 0.2 }}
+        viewport={{ once: true, amount: 0.3 }} // Triggers pop-up when 30% of section is scrolled into view
       >
         {/* Card 1: Report an Incident */}
         <motion.button
           id="bottom-card-report-incident-btn"
           variants={popUpCardVariants}
           whileHover={{ 
-            y: -3,
-            transition: { duration: 0.2, ease: 'easeOut' } 
+            scale: 1.02, 
+            transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } 
           }}
           whileTap={{ 
-            scale: 0.98,
-            transition: { duration: 0.1 }
+            scale: 0.97,
+            transition: { duration: 0.5, ease: 'easeOut' }
           }}
           onClick={() => onNavigate('report')}
-          className="group relative overflow-hidden bg-gradient-to-br from-[#0b0f17] to-[#131926] text-white rounded-3xl p-6 sm:p-7 text-left border border-white/15 shadow-xl shadow-slate-900/10 transition-all duration-300 hover:border-orange-500/50 hover:shadow-2xl hover:shadow-orange-950/25 flex items-center justify-between gap-4 cursor-pointer focus:outline-none focus:ring-2 focus:ring-orange-500"
+          className="group relative overflow-hidden bg-[#101318] text-white rounded-3xl p-5 sm:p-7 text-left border border-white/10 shadow-xl transition-all duration-500 ease-out hover:border-orange-500/40 hover:shadow-orange-950/30 flex items-center justify-between gap-4 cursor-pointer focus:outline-none focus:ring-2 focus:ring-orange-500"
         >
-          {/* Subtle Ambient Backlight Glow on hover */}
-          <div className="absolute inset-0 bg-gradient-to-r from-orange-500/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-          <div className="absolute -bottom-8 -right-8 w-36 h-36 bg-orange-500/10 rounded-full blur-2xl pointer-events-none group-hover:bg-orange-500/20 transition-all duration-300" />
+          {/* Ambient Glow Transition */}
+          <div className="absolute inset-0 bg-linear-to-t from-orange-900/20 via-transparent to-transparent pointer-events-none opacity-40 group-hover:opacity-100 transition-opacity duration-700 ease-out" />
+          <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 w-3/4 h-24 bg-orange-600/15 blur-2xl pointer-events-none group-hover:bg-orange-500/25 group-hover:h-28 transition-all duration-700 ease-out" />
 
           {/* Left Block */}
           <div className="flex items-center gap-4 sm:gap-5 z-10">
-            {/* Tactical Icon Container */}
-            <div className="w-13 h-13 sm:w-15 sm:h-15 rounded-2xl bg-white/5 border border-white/15 flex items-center justify-center shrink-0 shadow-lg group-hover:border-orange-500/50 group-hover:bg-orange-500/15 transition-all duration-300">
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-md transition-transform duration-300 group-hover:scale-105">
+            {/* Icon Container with subtle pop on hover */}
+            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#1e222b] border border-orange-500/30 flex items-center justify-center shrink-0 shadow-lg group-hover:border-orange-500/60 transition-all duration-500 ease-out">
+              <div className="w-10 h-10 rounded-full bg-linear-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-md transition-transform duration-500 ease-out group-hover:scale-110">
                 <FileWarning className="w-5 h-5 text-white" />
               </div>
             </div>
 
             {/* Content */}
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight font-sans transition-colors duration-200 group-hover:text-orange-400">
-                  Report an Incident
-                </h3>
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/30 hidden sm:inline-block">
-                  Citizen Feed
-                </span>
-              </div>
+              <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight font-sans transition-colors duration-500 ease-out group-hover:text-orange-400">
+                Report an Incident
+              </h3>
               <p className="text-xs sm:text-sm text-slate-300 font-normal leading-relaxed max-w-xs">
                 Help us respond faster by reporting incidents in your area.
               </p>
             </div>
           </div>
 
-          {/* Right Action Button Circle */}
-          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-orange-500 group-hover:bg-orange-600 flex items-center justify-center text-white shrink-0 shadow-lg shadow-orange-950/40 transition-all duration-200 group-hover:scale-105 z-10">
-            <ArrowRight className="w-5 h-5 transition-transform duration-200 group-hover:translate-x-1" />
+          {/* Right Arrow Button */}
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#f26522] group-hover:bg-[#ea580c] flex items-center justify-center text-white shrink-0 shadow-lg shadow-orange-950/40 transition-all duration-500 ease-out z-10">
+            <ArrowRight className="w-5 h-5 transition-transform duration-500 ease-out group-hover:translate-x-1.5" />
           </div>
         </motion.button>
 
@@ -94,51 +89,46 @@ export const BottomActionCards = ({ onNavigate }) => {
           id="bottom-card-nearby-incidents-btn"
           variants={popUpCardVariants}
           whileHover={{ 
-            y: -3,
-            transition: { duration: 0.2, ease: 'easeOut' } 
+            scale: 1.02, 
+            transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } 
           }}
           whileTap={{ 
-            scale: 0.98,
-            transition: { duration: 0.1 }
+            scale: 0.97,
+            transition: { duration: 0.5, ease: 'easeOut' }
           }}
           onClick={() => onNavigate('nearby')}
-          className="group relative overflow-hidden bg-gradient-to-br from-[#0b0f17] to-[#131926] text-white rounded-3xl p-6 sm:p-7 text-left border border-white/15 shadow-xl shadow-slate-900/10 transition-all duration-300 hover:border-amber-500/50 hover:shadow-2xl hover:shadow-amber-950/25 flex items-center justify-between gap-4 cursor-pointer focus:outline-none focus:ring-2 focus:ring-orange-500"
+          className="group relative overflow-hidden bg-[#101318] text-white rounded-3xl p-5 sm:p-7 text-left border border-white/10 shadow-xl transition-all duration-500 ease-out hover:border-orange-500/40 hover:shadow-orange-950/30 flex items-center justify-between gap-4 cursor-pointer focus:outline-none focus:ring-2 focus:ring-orange-500"
         >
-          {/* Subtle Ambient Backlight Glow on hover */}
-          <div className="absolute inset-0 bg-gradient-to-r from-amber-500/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-          <div className="absolute -bottom-8 -right-8 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl pointer-events-none group-hover:bg-amber-500/20 transition-all duration-300" />
+          {/* Ambient Glow Transition */}
+          <div className="absolute inset-0 bg-linear-to-t from-orange-900/20 via-transparent to-transparent pointer-events-none opacity-40 group-hover:opacity-100 transition-opacity duration-700 ease-out" />
+          <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 w-3/4 h-24 bg-orange-600/15 blur-2xl pointer-events-none group-hover:bg-orange-500/25 group-hover:h-28 transition-all duration-700 ease-out" />
 
           {/* Left Block */}
           <div className="flex items-center gap-4 sm:gap-5 z-10">
-            {/* Tactical Icon Container */}
-            <div className="w-13 h-13 sm:w-15 sm:h-15 rounded-2xl bg-white/5 border border-white/15 flex items-center justify-center shrink-0 shadow-lg group-hover:border-amber-500/50 group-hover:bg-amber-500/15 transition-all duration-300">
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-md transition-transform duration-300 group-hover:scale-105">
+            {/* Icon Container with subtle pop on hover */}
+            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#1e222b] border border-orange-500/30 flex items-center justify-center shrink-0 shadow-lg group-hover:border-orange-500/60 transition-all duration-500 ease-out">
+              <div className="w-10 h-10 rounded-full bg-linear-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-md transition-transform duration-500 ease-out group-hover:scale-110">
                 <MapPin className="w-5 h-5 text-white" />
               </div>
             </div>
 
             {/* Content */}
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight font-sans transition-colors duration-200 group-hover:text-amber-400">
-                  Nearby Incidents
-                </h3>
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 hidden sm:inline-block">
-                  Proximity Radar
-                </span>
-              </div>
+              <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight font-sans transition-colors duration-500 ease-out group-hover:text-orange-400">
+                Nearby Incidents
+              </h3>
               <p className="text-xs sm:text-sm text-slate-300 font-normal leading-relaxed max-w-xs">
                 View recent incidents happening near your location.
               </p>
             </div>
           </div>
 
-          {/* Right Action Button Circle */}
-          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 group-hover:from-amber-600 group-hover:to-orange-600 flex items-center justify-center text-white shrink-0 shadow-lg shadow-amber-950/40 transition-all duration-200 group-hover:scale-105 z-10">
-            <ArrowRight className="w-5 h-5 transition-transform duration-200 group-hover:translate-x-1" />
+          {/* Right Arrow Button */}
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#f26522] group-hover:bg-[#ea580c] flex items-center justify-center text-white shrink-0 shadow-lg shadow-orange-950/40 transition-all duration-500 ease-out z-10">
+            <ArrowRight className="w-5 h-5 transition-transform duration-500 ease-out group-hover:translate-x-1.5" />
           </div>
         </motion.button>
       </motion.div>
     </section>
   );
-};
+};

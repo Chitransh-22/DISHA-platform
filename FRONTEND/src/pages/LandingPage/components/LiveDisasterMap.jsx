@@ -196,6 +196,7 @@ export const LiveDisasterMap = () => {
         maxZoom: 14,
         zoomControl: false,
         attributionControl: true,
+        scrollWheelZoom: false
       });
 
       // Real OpenStreetMap Tile Layer
@@ -309,7 +310,7 @@ export const LiveDisasterMap = () => {
           <p class="text-xs text-slate-300 line-clamp-2 leading-relaxed bg-white/5 p-2 rounded-lg border border-white/10">
             ${incident.description || 'Disaster situation briefing.'}
           </p>
-          <button id="inspect-btn-${incident.id}" class="w-full bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold text-xs py-2 rounded-xl transition-all duration-150 shadow-md cursor-pointer flex items-center justify-center gap-1.5 mt-2">
+          <button id="inspect-btn-${incident.id}" class="w-full bg-linear-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold text-xs py-2 rounded-xl transition-all duration-150 shadow-md cursor-pointer flex items-center justify-center gap-1.5 mt-2">
             <span>Inspect Full Briefing</span>
             <span>→</span>
           </button>
@@ -442,7 +443,7 @@ export const LiveDisasterMap = () => {
         </div>
 
         {/* Real OpenStreetMap Viewport */}
-        <div className="relative w-full h-[520px] sm:h-[580px] lg:h-[640px] bg-slate-100 overflow-hidden">
+        <div className="relative w-full h-130 sm:h-145 lg:h-160 bg-slate-100 overflow-hidden">
           
           {/* Leaflet Map DOM Root */}
           <div ref={mapContainerRef} className="w-full h-full z-10" />
