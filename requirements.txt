@@ -1,4 +1,4 @@
-# DISHA Platform - Project Dependencies
+# DISHA Platform - Backend Dependencies
 # Disaster Intelligence and Situational Hazard Awareness Platform
 
 # Web Framework & Server
@@ -6,7 +6,14 @@ fastapi>=0.110.0,<1.0.0
 uvicorn[standard]>=0.24.0,<1.0.0
 starlette>=0.36.0,<1.0.0
 pydantic>=2.6.0,<3.0.0
+pydantic-settings>=2.0.0,<3.0.0
+email-validator>=2.0.0
 python-multipart>=0.0.6
+
+# Authentication & Cryptography
+argon2-cffi>=23.1.0
+bcrypt>=4.0.0
+PyJWT>=2.8.0
 
 # Database
 pymongo[srv]>=4.6.0,<5.0.0

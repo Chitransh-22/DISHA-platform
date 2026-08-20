@@ -1,91 +1,31 @@
+"""
+DISHA Platform - Root Entrypoint Wrapper
+Disaster Intelligence and Situational Hazard Awareness Platform
+
+Delegates to app.main:app for unified production-grade architecture.
+"""
+
 import os
+import sys
 from pathlib import Path
 
-import uvicorn
-from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-# Ensure .env is loaded regardless of current working directory
+# Ensure root backend directory is in sys.path
 _backend_dir = Path(__file__).resolve().parent
-load_dotenv(_backend_dir / ".env")
-load_dotenv()
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
 
-from app.routes.gnews import router as news_router
-from app.routes.earthquakes import router as earthquakes_router
-from app.routes.sachet import router as sachet_router
-from app.routes.emergency_services import router as emergency_services_router
-from app.routes.events import router as events_router
-
-app = FastAPI(
-    title="DISHA Backend API",
-    description="Disaster Intelligence and Situational Hazard Awareness Platform API",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-)
-
-# Allow CORS for frontend integration (production Vercel and local development)
-default_origins = [
-    "https://disha-platform.vercel.app",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-]
-
-# Allow additional origins from environment variables if specified
-env_origins = os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS")
-origins = list(default_origins)
-if env_origins:
-    for item in env_origins.split(","):
-        cleaned = item.strip()
-        if cleaned and cleaned not in origins:
-            origins.append(cleaned)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Register routes
-app.include_router(events_router)
-app.include_router(emergency_services_router)
-app.include_router(news_router)
-app.include_router(earthquakes_router)
-app.include_router(sachet_router)
-
-
-@app.get("/", tags=["General"])
-async def root():
-    return {
-        "message": "DISHA Platform API is running",
-        "docs": "/docs",
-        "health": "/api/health",
-    }
-
-
-@app.get("/api/health", tags=["Health"])
-async def health():
-    return {
-        "status": "ok",
-        "service": "DISHA Backend",
-    }
-
+import uvicorn
+from app.core.config import settings
+from app.main import app
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "127.0.0.1")
-    port = int(os.getenv("PORT", "8000"))
-    reload = os.getenv("ENV", "development").lower() == "development"
+    host = settings.HOST
+    port = settings.PORT
+    reload = not settings.is_production
 
     print(f"Starting DISHA Backend server at http://{host}:{port}")
     uvicorn.run(
-        "main:app",
+        "app.main:app",
         host=host,
         port=port,
         reload=reload,

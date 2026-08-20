@@ -5,7 +5,7 @@ import { LiveDisasterMap } from './components/LiveDisasterMap';
 import { BottomActionCards } from './components/BottomActionCards';
 import { Footer } from './components/Footer';
 
-export const LandingPage = ({ currentPage, onNavigate }) => {
+export const LandingPage = ({ currentPage, onNavigate, isLoggedIn = false, currentUser = null, onLogout }) => {
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col selection:bg-orange-500 selection:text-white relative overflow-hidden">
       {/* Subtle Ambient Background Gradients & Grid Texture */}
@@ -14,7 +14,7 @@ export const LandingPage = ({ currentPage, onNavigate }) => {
       <div className="fixed bottom-10 right-0 w-125 h-125 bg-linear-to-tl from-orange-500/5 via-blue-500/5 to-transparent blur-3xl pointer-events-none z-0 animate-float-reverse" />
       
       {/* Top Navbar */}
-      <Navbar currentPage={currentPage} onNavigate={onNavigate} />
+      <Navbar currentPage={currentPage} onNavigate={onNavigate} isLoggedIn={isLoggedIn} currentUser={currentUser} onLogout={onLogout} />
 
       {/* Main Content */}
       <main className="flex-1 relative z-10">

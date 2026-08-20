@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LandingPage } from './pages/LandingPage/LandingPage';
 import { ViewMapPage } from './pages/ViewMapPage';
 import { ReportIncidentPage } from './pages/ReportIncidentPage';
@@ -8,18 +8,41 @@ import { NearbyIncidentsPage } from './pages/NearbyIncidentsPage';
 import { AnalysisPage } from './pages/AnalysisPage/AnalysisPage';
 import { GraphsAnalyticsPage } from './pages/AnalysisPage/GraphsAnalyticsPage';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { AuthProvider, useAuth } from './context/AuthContext';
 
-export default function App() {
+function AppContent() {
   const [currentPage, setCurrentPage] = useState('landing');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [redirectAfterAuth, setRedirectAfterAuth] = useState(null);
+  const { user, isLoggedIn, logout } = useAuth();
 
-  const handleNavigate = (page) => {
+  // If user arrives directly on an auth callback route
+  useEffect(() => {
+    if (window.location.pathname.startsWith('/auth/google/success')) {
+      setCurrentPage('landing');
+    }
+  }, []);
+
+  const handleNavigate = (page, redirectTarget = null) => {
+    if (redirectTarget) {
+      setRedirectAfterAuth(redirectTarget);
+    }
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleLoginSuccess = () => {
-    setIsLoggedIn(true);
+    if (redirectAfterAuth) {
+      const target = redirectAfterAuth;
+      setRedirectAfterAuth(null);
+      setCurrentPage(target);
+    } else {
+      setCurrentPage('landing');
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setCurrentPage('landing');
   };
 
   const renderContent = () => {
@@ -35,12 +58,26 @@ export default function App() {
       case 'graphs':
         return <GraphsAnalyticsPage onNavigate={handleNavigate} />;
       case 'auth':
-        return <AuthPage onNavigate={handleNavigate} onLoginSuccess={handleLoginSuccess} />;
+        return (
+          <AuthPage
+            onNavigate={handleNavigate}
+            onLoginSuccess={handleLoginSuccess}
+            redirectTarget={redirectAfterAuth}
+          />
+        );
       case 'nearby':
         return <NearbyIncidentsPage onNavigate={handleNavigate} />;
       case 'landing':
       default:
-        return <LandingPage currentPage={currentPage} onNavigate={handleNavigate} />;
+        return (
+          <LandingPage
+            currentPage={currentPage}
+            onNavigate={handleNavigate}
+            isLoggedIn={isLoggedIn}
+            currentUser={user}
+            onLogout={handleLogout}
+          />
+        );
     }
   };
 
@@ -48,5 +85,13 @@ export default function App() {
     <ErrorBoundary title="DISHA Application Error">
       {renderContent()}
     </ErrorBoundary>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }

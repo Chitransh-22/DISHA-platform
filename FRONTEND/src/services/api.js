@@ -411,3 +411,268 @@ export const fetchNearbyEmergencyServices = async (
   }
   return data;
 };
+
+// ─── Authentication State & API Client Layer ────────────────────────────────
+
+let _inMemoryAccessToken = null;
+let _refreshPromise = null;
+
+export const setAccessToken = (token) => {
+  _inMemoryAccessToken = token;
+  if (token) {
+    try {
+      localStorage.setItem('disha_has_session', 'true');
+    } catch (e) {}
+  } else {
+    try {
+      localStorage.removeItem('disha_has_session');
+    } catch (e) {}
+  }
+};
+
+export const getAccessToken = () => _inMemoryAccessToken;
+
+export const getAuthHeaders = (extraHeaders = {}) => {
+  const headers = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+    ...extraHeaders,
+  };
+  if (_inMemoryAccessToken) {
+    headers['Authorization'] = `Bearer ${_inMemoryAccessToken}`;
+  }
+  return headers;
+};
+
+/**
+ * Returns the backend Google OAuth2 initiate URL.
+ */
+export const authGoogleLoginUrl = () => {
+  const baseUrl = getApiBaseUrl();
+  return `${baseUrl}/api/auth/google/login`;
+};
+
+/**
+ * Parses user-friendly error message from failed response.
+ */
+const parseErrorMessage = (data, status) => {
+  if (data?.detail) {
+    if (typeof data.detail === 'string') return data.detail;
+    if (Array.isArray(data.detail)) {
+      return data.detail.map((err) => err.msg || err.message || JSON.stringify(err)).join(', ');
+    }
+  }
+  if (data?.message) return data.message;
+  if (status === 401) return 'Your session has expired. Please sign in again.';
+  if (status === 403) return 'You do not have permission or your account is unverified.';
+  if (status === 409) return 'An account with these credentials already exists.';
+  if (status === 429) return 'Too many attempts. Please wait a moment and try again.';
+  if (status >= 500) return 'Server error occurred. Please try again shortly.';
+  return 'Request failed. Please check your network and try again.';
+};
+
+/**
+ * Core authenticated fetch with automatic 401 token refresh queue.
+ */
+export const authenticatedFetch = async (url, options = {}) => {
+  const finalUrl = url.startsWith('http') ? url : `${getApiBaseUrl()}${url}`;
+  const headers = getAuthHeaders(options.headers || {});
+  
+  const fetchOptions = {
+    ...options,
+    headers,
+    credentials: 'include',
+  };
+
+  let response = await fetch(finalUrl, fetchOptions);
+
+  // If 401 Unauthorized, perform single in-flight token refresh and retry once
+  if (response.status === 401 && localStorage.getItem('disha_has_session') === 'true') {
+    if (!_refreshPromise) {
+      _refreshPromise = authRefreshToken()
+        .then((data) => {
+          _refreshPromise = null;
+          return data;
+        })
+        .catch((err) => {
+          _refreshPromise = null;
+          setAccessToken(null);
+          throw err;
+        });
+    }
+
+    try {
+      await _refreshPromise;
+      // Retry original request with newly issued access token
+      const retryHeaders = getAuthHeaders(options.headers || {});
+      response = await fetch(finalUrl, {
+        ...fetchOptions,
+        headers: retryHeaders,
+      });
+    } catch (refreshErr) {
+      // Refresh failed; propagate original 401
+      setAccessToken(null);
+    }
+  }
+
+  return response;
+};
+
+/**
+ * Register a new user account.
+ */
+export const authRegister = async (userData) => {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(userData),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(parseErrorMessage(data, response.status));
+  }
+  return data;
+};
+
+/**
+ * Verify user email with 6-digit OTP.
+ */
+export const authVerifyEmail = async ({ email, otp }) => {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/auth/verify-email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ email, otp }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(parseErrorMessage(data, response.status));
+  }
+  return data;
+};
+
+/**
+ * Resend OTP to user email.
+ */
+export const authResendOtp = async (email) => {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/auth/resend-otp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ email }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(parseErrorMessage(data, response.status));
+  }
+  return data;
+};
+
+/**
+ * Log in with email and password. Sets HTTP-Only refresh cookie.
+ */
+export const authLogin = async ({ email, password }) => {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ email, password }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(parseErrorMessage(data, response.status));
+  }
+
+  if (data.access_token) {
+    setAccessToken(data.access_token);
+  }
+  return data;
+};
+
+/**
+ * Refresh access token using the HTTP-Only cookie.
+ */
+export const authRefreshToken = async () => {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/auth/refresh-token`, {
+    method: 'POST',
+    headers: { 'Accept': 'application/json' },
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    setAccessToken(null);
+    throw new Error('Session expired or invalid refresh token.');
+  }
+
+  const data = await response.json();
+  if (data.access_token) {
+    setAccessToken(data.access_token);
+  }
+  return data;
+};
+
+/**
+ * Get current authenticated user profile.
+ */
+export const authGetMe = async () => {
+  const response = await authenticatedFetch('/api/auth/get-me', {
+    method: 'GET',
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(parseErrorMessage(data, response.status));
+  }
+
+  return data;
+};
+
+/**
+ * Log out current session and clear cookie.
+ */
+export const authLogout = async () => {
+  const baseUrl = getApiBaseUrl();
+  try {
+    await fetch(`${baseUrl}/api/auth/logout`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+  } catch (e) {
+    console.warn('[DISHA Auth] Logout notice:', e);
+  } finally {
+    setAccessToken(null);
+  }
+  return { success: true };
+};
+
+/**
+ * Log out all devices for current user.
+ */
+export const authLogoutAll = async () => {
+  const baseUrl = getApiBaseUrl();
+  try {
+    await fetch(`${baseUrl}/api/auth/logout-all`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+  } catch (e) {
+    console.warn('[DISHA Auth] Logout-all notice:', e);
+  } finally {
+    setAccessToken(null);
+  }
+  return { success: true };
+};
+
+

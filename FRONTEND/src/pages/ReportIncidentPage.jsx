@@ -66,7 +66,7 @@ const LoginPrompt = ({ onNavigate }) => (
     <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
       <button
         id="login-to-report-btn"
-        onClick={() => onNavigate('auth')}
+        onClick={() => onNavigate('auth', 'report')}
         className="flex-1 flex items-center justify-center gap-2 bg-linear-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-semibold text-sm px-5 py-3 rounded-xl shadow-md shadow-orange-200 transition-all duration-200 cursor-pointer"
       >
         <LogIn className="w-4 h-4" />
@@ -74,7 +74,7 @@ const LoginPrompt = ({ onNavigate }) => (
       </button>
       <button
         id="create-account-btn"
-        onClick={() => onNavigate('auth')}
+        onClick={() => onNavigate('auth', 'report')}
         className="flex-1 bg-slate-900 hover:bg-slate-700 text-white font-semibold text-sm px-5 py-3 rounded-xl transition-colors cursor-pointer"
       >
         Create Account

@@ -552,7 +552,7 @@ def get_unified_events(
             "sachet": sachet_count,
             "news": news_count,
         },
-        "categories": available_categories,
+        "categories": sorted_categories,
         "events": paged_events,
     }
 
