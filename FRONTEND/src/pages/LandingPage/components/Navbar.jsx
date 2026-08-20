@@ -3,6 +3,7 @@ import {
   Map,
   AlertTriangle,
   Bell,
+  BarChart2,
   User,
   Menu,
   X,
@@ -598,6 +599,98 @@ export const Navbar = ({ currentPage, onNavigate }) => {
 
             </button>
 
+            {/* =================================================
+                ANALYSIS
+            ================================================= */}
+
+            <button
+              id="nav-analysis-btn"
+              onClick={() => handleNavigation('analysis')}
+              className={`
+                group
+                relative
+                flex
+                items-center
+                gap-2
+                px-3
+                lg:px-3.5
+                xl:px-4
+                py-2
+                lg:py-2.5
+                rounded-full
+                text-sm
+                font-medium
+                transition-all
+                duration-300
+                cursor-pointer
+                overflow-hidden
+                whitespace-nowrap
+                shrink-0
+                ${
+                  currentPage === 'analysis' || currentPage === 'graphs'
+                    ? 'text-orange-400 bg-white/5'
+                    : 'text-slate-200 hover:text-white'
+                }
+              `}
+            >
+
+              <span
+                className="
+                  absolute
+                  inset-0
+                  bg-linear-to-r
+                  from-orange-500/10
+                  to-amber-500/10
+                  opacity-0
+                  group-hover:opacity-100
+                  transition-opacity
+                  duration-300
+                  rounded-full
+                "
+              />
+
+              <span
+                className={`
+                  absolute
+                  bottom-0
+                  left-1/2
+                  -translate-x-1/2
+                  h-0.5
+                  bg-linear-to-r
+                  from-orange-500
+                  to-amber-400
+                  rounded-full
+                  transition-all
+                  duration-300
+                  ${
+                    currentPage === 'analysis' || currentPage === 'graphs'
+                      ? 'w-3/4'
+                      : 'w-0 group-hover:w-3/4'
+                  }
+                `}
+              />
+
+              <BarChart2
+                className="
+                  relative
+                  z-10
+                  w-4
+                  h-4
+                  text-orange-400
+                  shrink-0
+                  transition-transform
+                  duration-300
+                  group-hover:scale-125
+                  group-hover:rotate-6
+                "
+              />
+
+              <span className="relative z-10">
+                Analysis
+              </span>
+
+            </button>
+
           </div>
 
           {/* =================================================
@@ -1007,6 +1100,51 @@ export const Navbar = ({ currentPage, onNavigate }) => {
                 "
               >
                 3 Live
+              </span>
+
+            </button>
+
+            {/* ANALYSIS */}
+
+            <button
+              id="mobile-nav-analysis-btn"
+              onClick={() => handleNavigation('analysis')}
+              className={`
+                group
+                flex
+                items-center
+                gap-3
+                px-3.5
+                py-3
+                rounded-xl
+                hover:bg-white/10
+                text-left
+                text-sm
+                font-medium
+                cursor-pointer
+                transition-all
+                duration-200
+                ${
+                  currentPage === 'analysis' || currentPage === 'graphs'
+                    ? 'text-orange-400 bg-white/5'
+                    : 'text-slate-200 hover:text-orange-400'
+                }
+              `}
+            >
+
+              <BarChart2
+                className="
+                  w-4
+                  h-4
+                  text-orange-400
+                  transition-transform
+                  duration-200
+                  group-hover:scale-110
+                "
+              />
+
+              <span>
+                Analysis
               </span>
 
             </button>
