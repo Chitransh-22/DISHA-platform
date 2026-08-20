@@ -398,6 +398,201 @@
             margin-bottom: 4px;
         }
 
+        /* ---------------- NEARBY EMERGENCY SERVICES ---------------- */
+
+        .nearby-panel {
+            margin-top: 18px;
+            padding-top: 14px;
+            border-top: 1px solid #263244;
+        }
+
+        .nearby-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .nearby-heading {
+            font-size: 12px;
+            font-weight: bold;
+            color: #38bdf8;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .pulse-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #38bdf8;
+            box-shadow: 0 0 8px #38bdf8;
+            animation: pulse-glow 1.5s infinite;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .nearby-loading {
+            background: #182131;
+            border: 1px solid #263244;
+            border-radius: 8px;
+            padding: 14px;
+            text-align: center;
+            font-size: 12px;
+            color: #9ca3af;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(56, 189, 248, 0.2);
+            border-top-color: #38bdf8;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .nearby-category {
+            margin-bottom: 12px;
+        }
+
+        .category-header {
+            font-size: 11px;
+            font-weight: bold;
+            color: #9ca3af;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .service-card {
+            background: #182131;
+            border: 1px solid #263244;
+            border-radius: 7px;
+            padding: 9px 11px;
+            margin-bottom: 6px;
+            transition: border-color 0.15s ease;
+        }
+
+        .service-card:hover {
+            border-color: #38bdf8;
+        }
+
+        .service-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 6px;
+            margin-bottom: 3px;
+        }
+
+        .service-name {
+            font-size: 12px;
+            font-weight: bold;
+            color: #e5e7eb;
+            line-height: 1.3;
+        }
+
+        .service-dist {
+            font-size: 10px;
+            font-family: monospace;
+            background: rgba(56, 189, 248, 0.15);
+            color: #38bdf8;
+            padding: 2px 5px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+
+        .service-address {
+            font-size: 10px;
+            color: #9ca3af;
+            margin-bottom: 6px;
+            line-height: 1.2;
+        }
+
+        .service-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .btn-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-dir {
+            background: #0284c7;
+            color: #ffffff;
+        }
+
+        .btn-dir:hover {
+            background: #0369a1;
+        }
+
+        .btn-call {
+            background: #16a34a;
+            color: #ffffff;
+        }
+
+        .btn-call:hover {
+            background: #15803d;
+        }
+
+        .nearby-empty {
+            background: #182131;
+            border: 1px solid #263244;
+            border-radius: 7px;
+            padding: 10px;
+            text-align: center;
+            font-size: 11px;
+            color: #6b7280;
+        }
+
+        .nearby-error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 7px;
+            padding: 10px;
+            color: #fca5a5;
+            font-size: 11px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .btn-retry {
+            align-self: flex-start;
+            background: #1f2937;
+            border: 1px solid #374151;
+            color: #e5e7eb;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            cursor: pointer;
+        }
+
         /* ---------------- RESPONSIVE ---------------- */
 
         @media(max-width: 1100px) {
@@ -833,15 +1028,48 @@
         5
     );
 
-
-    L.tileLayer(
-        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    // Realistic Base Maps
+    const streetLayer = L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
         {
             maxZoom: 19,
-            attribution:
-                '&copy; OpenStreetMap contributors'
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
         }
     ).addTo(map);
+
+    const satelliteLayer = L.layerGroup([
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '&copy; Esri, Maxar, Earthstar Geographics',
+            maxZoom: 19
+        }),
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '&copy; Esri',
+            maxZoom: 19
+        })
+    ]);
+
+    const terrainLayer = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+        {
+            maxZoom: 19,
+            attribution: '&copy; Esri &copy; OpenStreetMap'
+        }
+    );
+
+    const darkLayer = L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        {
+            maxZoom: 19,
+            attribution: '&copy; CARTO &copy; OpenStreetMap'
+        }
+    );
+
+    const baseMaps = {
+        "🗺️ Real Street Map": streetLayer,
+        "🛰️ Satellite (Hybrid)": satelliteLayer,
+        "🏔️ Terrain & Topo": terrainLayer,
+        "🌙 Tactical Dark": darkLayer
+    };
 
 
     /* =========================================================
@@ -859,6 +1087,17 @@
 
     const ngoLayer =
         L.layerGroup().addTo(map);
+
+    L.control.layers(
+        baseMaps,
+        {
+            "⚠️ Incidents": eventLayer,
+            "🏥 Medical": hospitalLayer,
+            "🏠 Shelters": shelterLayer,
+            "🤝 NGOs": ngoLayer
+        },
+        { position: 'topright', collapsed: true }
+    ).addTo(map);
 
 
     /* =========================================================
@@ -1278,164 +1517,336 @@
 
             </div>
 
+
+            <!-- NEARBY EMERGENCY SERVICES SECTION -->
+
+            <div class="nearby-panel" id="nearbyEmergencySection">
+
+                <div class="nearby-title-row">
+
+                    <div class="nearby-heading">
+                        <span class="pulse-dot"></span>
+                        NEARBY EMERGENCY SERVICES
+                    </div>
+
+                    <span style="font-size: 10px; color: #38bdf8; font-family: monospace;">
+                        Radius: 5 km
+                    </span>
+
+                </div>
+
+                <div id="nearbyEmergencyBody">
+
+                    <div class="nearby-loading">
+                        <span class="spinner"></span>
+                        Finding nearby emergency services within 5 km...
+                    </div>
+
+                </div>
+
+            </div>
+
         `;
 
-    }
-
-
-    /* =========================================================
-       STATISTICS
-       ========================================================= */
-
-    function updateStats() {
-
-        document.getElementById(
-            "totalEvents"
-        ).textContent =
-            disasterEvents.length;
-
-
-        document.getElementById(
-            "criticalEvents"
-        ).textContent =
-            disasterEvents.filter(
-                event =>
-                    event.severity === "Critical"
-            ).length;
+        loadNearbyServicesForIndex(event.latitude, event.longitude, event.id);
 
     }
 
 
     /* =========================================================
-       FACILITY DATA
+       DYNAMIC NEARBY EMERGENCY SERVICES (OVERPASS / BACKEND API)
        ========================================================= */
 
-    /*
-        These are demonstration facilities.
+    const nearbyCacheIndex = new Map();
+    const dynamicEmergencyLayer = L.layerGroup().addTo(map);
 
-        Later we can fetch actual nearby facilities
-        from OpenStreetMap Overpass API.
-    */
+    function haversineIndex(lat1, lon1, lat2, lon2) {
+        const R = 6371.0;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return Math.round(R * c * 100) / 100;
+    }
 
+    function estimateTimeIndex(distKm) {
+        if (distKm <= 0.2) return 1;
+        return Math.max(1, Math.round((distKm / 35.0) * 60));
+    }
 
-    const facilities = [
+    function formatDistIndex(distKm) {
+        if (distKm < 1.0) return `${Math.round(distKm * 1000)} m`;
+        return `${distKm.toFixed(1)} km`;
+    }
 
-        {
-            name: "Emergency Hospital",
-            type: "hospital",
-            latitude: 26.1500,
-            longitude: 91.7400
-        },
+    function formatTimeIndex(min) {
+        if (min < 60) return `~${min} min`;
+        const hrs = Math.floor(min / 60);
+        const rem = min % 60;
+        return rem === 0 ? `~${hrs} hr` : `~${hrs} hr ${rem} min`;
+    }
 
-        {
-            name: "Relief Shelter",
-            type: "shelter",
-            latitude: 26.1380,
-            longitude: 91.7280
-        },
+    async function fetchOverpassFallbackIndex(lat, lng) {
+        const radiusKm = 5.0;
+        const deltaLat = radiusKm / 111.0;
+        const cosLat = Math.cos(lat * Math.PI / 180.0);
+        const deltaLng = radiusKm / (111.0 * Math.max(0.01, cosLat));
+        const south = (lat - deltaLat).toFixed(5);
+        const north = (lat + deltaLat).toFixed(5);
+        const west = (lng - deltaLng).toFixed(5);
+        const east = (lng + deltaLng).toFixed(5);
 
-        {
-            name: "Relief NGO",
-            type: "ngo",
-            latitude: 26.1450,
-            longitude: 91.7500
-        },
-
-        {
-            name: "Emergency Hospital",
-            type: "hospital",
-            latitude: 22.5800,
-            longitude: 88.3700
-        },
-
-        {
-            name: "Cyclone Shelter",
-            type: "shelter",
-            latitude: 22.5650,
-            longitude: 88.3550
+        const q = `[out:json][timeout:10][bbox:${south},${west},${north},${east}];(node["amenity"~"^(hospital|clinic|doctors|police|fire_station)$"];way["amenity"~"^(hospital|clinic|doctors|police|fire_station)$"];node["emergency"~"^(ambulance_station|fire_service)$"];way["emergency"~"^(ambulance_station|fire_service)$"];);out center body;`;
+        const endpoints = [
+            'https://overpass.openstreetmap.fr/api/interpreter',
+            'https://overpass-api.de/api/interpreter',
+            'https://lz4.overpass-api.de/api/interpreter',
+            'https://overpass.kumi.systems/api/interpreter'
+        ];
+        let elements = [];
+        for (const ep of endpoints) {
+            try {
+                const resp = await fetch(ep, {
+                    method: 'POST',
+                    body: 'data=' + encodeURIComponent(q),
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    signal: AbortSignal.timeout(4000)
+                });
+                if (!resp.ok) continue;
+                const json = await resp.json();
+                elements = json.elements || [];
+                break;
+            } catch(e) {}
         }
 
-    ];
+        const med = [], pol = [], fire = [];
+        const seen = new Set();
 
+        elements.forEach(el => {
+            const tags = el.tags || {};
+            const sLat = el.lat != null ? el.lat : (el.center && el.center.lat);
+            const sLon = el.lon != null ? el.lon : (el.center && el.center.lon);
+            if (sLat == null || sLon == null) return;
 
-    /* =========================================================
-       ADD FACILITIES
-       ========================================================= */
-
-    facilities.forEach(
-        facility => {
-
-            let layer;
-
-            let icon;
-
-
-            if (facility.type === "hospital") {
-
-                layer = hospitalLayer;
-                icon = hospitalIcon;
-
+            const amenity = (tags.amenity || '').toLowerCase();
+            const emergency = (tags.emergency || '').toLowerCase();
+            let cat = null, label = '', icon = '';
+            if (amenity === 'hospital' || amenity === 'clinic' || amenity === 'doctors') {
+                cat = 'medical'; label = 'Medical Centre / Hospital'; icon = '🏥';
+            } else if (amenity === 'police') {
+                cat = 'police'; label = 'Police Station'; icon = '🚔';
+            } else if (amenity === 'fire_station' || emergency === 'ambulance_station') {
+                cat = 'fire'; label = 'Fire/Ambulance Station'; icon = '🚒';
             }
+            if (!cat) return;
 
-            else if (
-                facility.type === "shelter"
-            ) {
+            const name = tags.name || tags['name:en'] || label;
+            const key = `${name.toLowerCase()}_${sLat.toFixed(3)}_${sLon.toFixed(3)}`;
+            if (seen.has(key)) return;
+            seen.add(key);
 
-                layer = shelterLayer;
-                icon = shelterIcon;
+            const dist = haversineIndex(lat, lng, sLat, sLon);
+            if (dist > radiusKm) return;
 
+            const timeMin = estimateTimeIndex(dist);
+            const phone = tags.phone || tags['contact:phone'] || tags['emergency:phone'] || tags.mobile || null;
+            const addr = tags['addr:full'] || [tags['addr:street'], tags['addr:city'], tags['addr:state']].filter(Boolean).join(', ') || null;
+            const dirUrl = `https://www.google.com/maps/dir/?api=1&origin=${lat.toFixed(6)},${lng.toFixed(6)}&destination=${sLat.toFixed(6)},${sLon.toFixed(6)}`;
+
+            const item = {
+                name,
+                category: cat,
+                category_label: label,
+                icon,
+                latitude: sLat,
+                longitude: sLon,
+                distance_km: dist,
+                distance_formatted: formatDistIndex(dist),
+                estimated_time_formatted: formatTimeIndex(timeMin),
+                address: addr,
+                phone: phone,
+                directions_url: dirUrl
+            };
+
+            if (cat === 'medical') med.push(item);
+            else if (cat === 'police') pol.push(item);
+            else if (cat === 'fire') fire.push(item);
+        });
+
+        med.sort((a, b) => a.distance_km - b.distance_km);
+        pol.sort((a, b) => a.distance_km - b.distance_km);
+        fire.sort((a, b) => a.distance_km - b.distance_km);
+
+        return {
+            medical: med,
+            police: pol,
+            fire: fire
+        };
+    }
+
+    async function loadNearbyServicesForIndex(lat, lng, eventId, forceRefresh = false) {
+        const body = document.getElementById("nearbyEmergencyBody");
+        if (!body) return;
+
+        const cacheKey = `${lat.toFixed(3)}_${lng.toFixed(3)}_5km`;
+        dynamicEmergencyLayer.clearLayers();
+
+        if (nearbyCacheIndex.has(cacheKey) && !forceRefresh) {
+            renderNearbyEmergencyUI(nearbyCacheIndex.get(cacheKey), lat, lng);
+            return;
+        }
+
+        body.innerHTML = `
+            <div class="nearby-loading">
+                <span class="spinner"></span>
+                Finding nearby emergency services within 5 km...
+            </div>
+        `;
+
+        let data = null;
+
+        // Try local backend API first (5 km radius, all facilities)
+        try {
+            const resp = await fetch(`http://127.0.0.1:8000/api/emergency-services?lat=${lat}&lng=${lng}&radius=5000`, {
+                signal: AbortSignal.timeout(4000)
+            });
+            if (resp.ok) {
+                const json = await resp.json();
+                data = json.services || json;
             }
+        } catch(e) {}
 
-            else {
-
-                layer = ngoLayer;
-                icon = ngoIcon;
-
+        if (!data) {
+            try {
+                data = await fetchOverpassFallbackIndex(lat, lng);
+            } catch(e) {
+                console.error("Overpass fallback failed:", e);
             }
+        }
 
+        if (data) {
+            nearbyCacheIndex.set(cacheKey, data);
+            renderNearbyEmergencyUI(data, lat, lng);
+        } else {
+            body.innerHTML = `
+                <div class="nearby-error">
+                    <span>Nearby emergency services could not be loaded.</span>
+                    <button class="btn-retry" onclick="loadNearbyServicesForIndex(${lat}, ${lng}, '${eventId}', true)">🔄 Retry</button>
+                </div>
+            `;
+        }
+    }
 
-            const marker =
-                L.marker(
-                    [
-                        facility.latitude,
-                        facility.longitude
-                    ],
-                    {
-                        icon: icon
-                    }
-                );
+    function renderNearbyEmergencyUI(services, lat, lng) {
+        const body = document.getElementById("nearbyEmergencyBody");
+        if (!body) return;
 
+        const med = services.medical || [];
+        const pol = services.police || [];
+        const fire = services.fire || [];
+        const total = med.length + pol.length + fire.length;
 
-            marker.bindPopup(`
+        if (total === 0) {
+            body.innerHTML = '<div class="nearby-empty">No nearby emergency services found.</div>';
+            return;
+        }
 
-                <b>
-                    ${facility.name}
-                </b>
+        function createServiceCard(svc) {
+            const cleanPhone = svc.phone ? svc.phone.replace(/[^0-9+]/g, '') : '';
+            return `
+                <div class="service-card">
+                    <div class="service-top">
+                        <div class="service-name">${svc.name}</div>
+                        <span class="service-dist">${svc.distance_formatted} • ${svc.estimated_time_formatted}</span>
+                    </div>
+                    ${svc.address ? `<div class="service-address">📍 ${svc.address}</div>` : ''}
+                    <div class="service-actions">
+                        <a href="${svc.directions_url}" target="_blank" class="btn-action btn-dir">
+                            📍 Directions
+                        </a>
+                        ${svc.phone ? `<a href="tel:${cleanPhone}" class="btn-action btn-call">📞 Call</a>` : ''}
+                    </div>
+                </div>
+            `;
+        }
 
-                <br>
+        let html = '';
 
-                Type:
-                ${facility.type}
+        if (med.length > 0) {
+            html += `
+                <div class="nearby-category">
+                    <div class="category-header">
+                        <span>🏥 Medical Centre / Hospital</span>
+                        <span style="color:#38bdf8;">${med.length} found</span>
+                    </div>
+                    ${med.map(createServiceCard).join('')}
+                </div>
+            `;
+        }
 
-                <br>
+        if (pol.length > 0) {
+            html += `
+                <div class="nearby-category">
+                    <div class="category-header">
+                        <span>🚔 Police Station</span>
+                        <span style="color:#38bdf8;">${pol.length} found</span>
+                    </div>
+                    ${pol.map(createServiceCard).join('')}
+                </div>
+            `;
+        }
 
-                Coordinates:
-                ${facility.latitude},
-                ${facility.longitude}
+        if (fire.length > 0) {
+            html += `
+                <div class="nearby-category">
+                    <div class="category-header">
+                        <span>🚒 Fire Station</span>
+                        <span style="color:#38bdf8;">${fire.length} found</span>
+                    </div>
+                    ${fire.map(createServiceCard).join('')}
+                </div>
+            `;
+        }
 
+        body.innerHTML = html;
+
+        // Render temporary emergency service pins on map
+        dynamicEmergencyLayer.clearLayers();
+        const all = [...med, ...pol, ...fire];
+        all.forEach(svc => {
+            if (svc.latitude == null || svc.longitude == null) return;
+            const icon = L.divIcon({
+                className: '',
+                html: `
+                    <div style="width:24px;height:24px;background:#0f172a;border:2px solid #38bdf8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;box-shadow:0 0 8px #38bdf8;cursor:pointer;">
+                        ${svc.icon || '📍'}
+                    </div>
+                `,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+            const m = L.marker([svc.latitude, svc.longitude], { icon: icon });
+            m.bindPopup(`
+                <b>${svc.icon || ''} ${svc.name}</b><br>
+                <span style="color:#38bdf8;font-size:11px;">${svc.distance_formatted} from incident • ${svc.estimated_time_formatted}</span><br>
+                ${svc.address ? `<span style="color:#9ca3af;font-size:11px;">📍 ${svc.address}</span><br>` : ''}
+                <div style="margin-top:6px;">
+                    <a href="${svc.directions_url}" target="_blank" style="background:#0284c7;color:#fff;padding:3px 8px;border-radius:3px;text-decoration:none;font-size:11px;font-weight:bold;">📍 Directions</a>
+                    ${svc.phone ? `<a href="tel:${svc.phone.replace(/[^0-9+]/g, '')}" style="background:#16a34a;color:#fff;padding:3px 8px;border-radius:3px;text-decoration:none;font-size:11px;font-weight:bold;margin-left:4px;">📞 Call</a>` : ''}
+                </div>
             `);
+            dynamicEmergencyLayer.addLayer(m);
+        });
+    }
 
 
-            marker.addTo(layer);
+    /* =========================================================
+       DYNAMIC FACILITIES STATUS
+       ========================================================= */
 
-        }
-    );
-
-
-    document.getElementById(
-        "facilityCount"
-    ).textContent =
-        facilities.length;
+    document.getElementById("facilityCount").textContent = "Live POI";
 
 
     /* =========================================================
