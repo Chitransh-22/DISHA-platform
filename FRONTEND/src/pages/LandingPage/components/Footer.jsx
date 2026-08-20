@@ -50,6 +50,12 @@ export const Footer = ({ onNavigate }) => {
             Alerts
           </button>
           <button 
+            onClick={() => onNavigate('analysis')} 
+            className="hover:text-orange-400 transition-colors cursor-pointer text-xs sm:text-sm text-orange-400 font-semibold"
+          >
+            Analysis
+          </button>
+          <button 
             onClick={() => onNavigate('nearby')} 
             className="hover:text-orange-400 transition-colors cursor-pointer text-xs sm:text-sm"
           >
