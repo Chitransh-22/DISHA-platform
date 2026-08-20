@@ -15,6 +15,7 @@ from app.routes.gnews import router as news_router
 from app.routes.earthquakes import router as earthquakes_router
 from app.routes.sachet import router as sachet_router
 from app.routes.emergency_services import router as emergency_services_router
+from app.routes.events import router as events_router
 
 app = FastAPI(
     title="DISHA Backend API",
@@ -24,14 +25,25 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Allow CORS for frontend integration
-origins = [
+# Allow CORS for frontend integration (production Vercel and local development)
+default_origins = [
+    "https://disha-platform.vercel.app",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "*",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
 ]
+
+# Allow additional origins from environment variables if specified
+env_origins = os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS")
+origins = list(default_origins)
+if env_origins:
+    for item in env_origins.split(","):
+        cleaned = item.strip()
+        if cleaned and cleaned not in origins:
+            origins.append(cleaned)
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,10 +54,11 @@ app.add_middleware(
 )
 
 # Register routes
+app.include_router(events_router)
+app.include_router(emergency_services_router)
 app.include_router(news_router)
 app.include_router(earthquakes_router)
 app.include_router(sachet_router)
-app.include_router(emergency_services_router)
 
 
 @app.get("/", tags=["General"])
