@@ -18,7 +18,15 @@ function AppContent() {
   // If user arrives directly on an auth callback route
   useEffect(() => {
     if (window.location.pathname.startsWith('/auth/google/success')) {
-      setCurrentPage('landing');
+      let target = 'landing';
+      try {
+        const savedRedirect = sessionStorage.getItem('disha_auth_redirect');
+        if (savedRedirect) {
+          sessionStorage.removeItem('disha_auth_redirect');
+          target = savedRedirect;
+        }
+      } catch (e) {}
+      setCurrentPage(target);
     }
   }, []);
 

@@ -904,57 +904,102 @@ export const Navbar = ({
             "
           >
 
-            {/* COMPACT SIGN IN */}
+            {/* COMPACT SIGN IN / USER BADGE */}
 
-            <button
-              id="nav-mobile-auth-btn"
-              onClick={() => handleNavigation('auth')}
-              className="
-                flex
-                items-center
-                justify-center
-                gap-1.5
-                whitespace-nowrap
-                bg-linear-to-r
-                from-[#f26522]
-                to-[#ea580c]
-                hover:from-[#ea580c]
-                hover:to-[#c2410c]
-                text-white
-                text-[11px]
-                sm:text-xs
-                font-semibold
-                px-2.5
-                sm:px-3.5
-                py-1.5
-                sm:py-2
-                rounded-full
-                cursor-pointer
-                transition-all
-                duration-200
-                active:scale-95
-                shadow-md
-                shadow-orange-950/30
-                border
-                border-orange-400/20
-              "
-            >
-
-              <User
+            {isLoggedIn ? (
+              <button
+                id="nav-mobile-user-btn"
+                onClick={() => handleNavigation('report')}
                 className="
-                  w-3
-                  h-3
-                  sm:w-3.5
-                  sm:h-3.5
-                  shrink-0
+                  flex
+                  items-center
+                  justify-center
+                  gap-1.5
+                  whitespace-nowrap
+                  bg-linear-to-r
+                  from-emerald-600
+                  to-teal-600
+                  text-white
+                  text-[11px]
+                  sm:text-xs
+                  font-semibold
+                  px-2.5
+                  sm:px-3.5
+                  py-1.5
+                  sm:py-2
+                  rounded-full
+                  cursor-pointer
+                  transition-all
+                  duration-200
+                  active:scale-95
+                  shadow-md
+                  shadow-emerald-950/30
+                  border
+                  border-emerald-400/20
+                  max-w-[120px]
                 "
-              />
-
-              <span className="whitespace-nowrap">
-                Sign In
-              </span>
-
-            </button>
+              >
+                <User
+                  className="
+                    w-3
+                    h-3
+                    sm:w-3.5
+                    sm:h-3.5
+                    shrink-0
+                  "
+                />
+                <span className="truncate">
+                  {currentUser?.name ? currentUser.name.split(' ')[0] : (currentUser?.username || 'Verified')}
+                </span>
+              </button>
+            ) : (
+              <button
+                id="nav-mobile-auth-btn"
+                onClick={() => handleNavigation('auth')}
+                className="
+                  flex
+                  items-center
+                  justify-center
+                  gap-1.5
+                  whitespace-nowrap
+                  bg-linear-to-r
+                  from-[#f26522]
+                  to-[#ea580c]
+                  hover:from-[#ea580c]
+                  hover:to-[#c2410c]
+                  text-white
+                  text-[11px]
+                  sm:text-xs
+                  font-semibold
+                  px-2.5
+                  sm:px-3.5
+                  py-1.5
+                  sm:py-2
+                  rounded-full
+                  cursor-pointer
+                  transition-all
+                  duration-200
+                  active:scale-95
+                  shadow-md
+                  shadow-orange-950/30
+                  border
+                  border-orange-400/20
+                "
+              >
+                <User
+                  className="
+                    w-3
+                    h-3
+                    sm:w-3.5
+                    sm:h-3.5
+                    shrink-0
+                  "
+                />
+                <span className="whitespace-nowrap">
+                  Sign In
+                </span>
+              </button>
+            )}
 
             {/* HAMBURGER */}
 

@@ -164,7 +164,12 @@ export const AuthProvider = ({ children }) => {
   /**
    * Redirects browser to Google OAuth initiate route.
    */
-  const googleLogin = useCallback(() => {
+  const googleLogin = useCallback((target = null) => {
+    if (target) {
+      try {
+        sessionStorage.setItem('disha_auth_redirect', target);
+      } catch (e) {}
+    }
     window.location.href = authGoogleLoginUrl();
   }, []);
 

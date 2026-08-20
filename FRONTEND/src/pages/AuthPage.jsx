@@ -533,7 +533,7 @@ export const AuthPage = ({ onNavigate, onLoginSuccess, redirectTarget = 'landing
 
   const handleGoogleAuth = () => {
     clearAuthError();
-    googleLogin();
+    googleLogin(redirectTarget);
   };
 
   return (
