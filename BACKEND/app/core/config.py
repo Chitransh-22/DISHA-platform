@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     )
     VERSION: str = "1.0.0"
     ENVIRONMENT: str = Field(
-        default="development",
+        default_factory=lambda: "production" if (os.getenv("RENDER") == "true" or bool(os.getenv("RENDER_SERVICE_ID")) or bool(os.getenv("RENDER_EXTERNAL_URL")) or bool(os.getenv("VERCEL"))) else "development",
         validation_alias=AliasChoices("ENVIRONMENT", "ENV"),
     )
     DEBUG: bool = False

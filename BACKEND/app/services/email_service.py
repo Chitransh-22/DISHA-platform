@@ -159,6 +159,55 @@ def generate_disha_email_html(otp: str, username: Optional[str] = None) -> str:
 </html>"""
 
 
+import socket
+
+def _create_ipv4_socket(host: str, port: int, timeout: float = 15.0) -> socket.socket:
+    """
+    Creates an IPv4-only TCP socket connection.
+    Prevents [Errno 101] Network is unreachable on cloud container platforms (like Render)
+    where dual-stack DNS resolves IPv6 (AAAA records) first, but the container lacks IPv6 egress routes.
+    """
+    try:
+        addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    except socket.gaierror as dns_err:
+        raise OSError(f"DNS resolution failed for {host}:{port} (IPv4): {dns_err}") from dns_err
+
+    if not addr_info:
+        raise OSError(f"No IPv4 address records found for {host}")
+
+    last_exc = None
+    for _, _, proto, _, sa in addr_info:
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, proto)
+            sock.settimeout(timeout)
+            sock.connect(sa)
+            return sock
+        except OSError as exc:
+            last_exc = exc
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+
+    raise last_exc or OSError(f"Failed to connect to {host}:{port} via IPv4")
+
+
+class IPv4SMTP(smtplib.SMTP):
+    """SMTP client that forces IPv4 socket connection."""
+    def _get_socket(self, host, port, timeout):
+        return _create_ipv4_socket(host, port, timeout)
+
+
+class IPv4SMTP_SSL(smtplib.SMTP_SSL):
+    """SMTP_SSL client that forces IPv4 socket connection."""
+    def _get_socket(self, host, port, timeout):
+        raw_sock = _create_ipv4_socket(host, port, timeout)
+        server_hostname = self._host if self._host else host
+        return self.context.wrap_socket(raw_sock, server_hostname=server_hostname)
+
+
 def _send_smtp_email_sync(
     recipient: str,
     subject: str,
@@ -199,7 +248,7 @@ def _send_smtp_email_sync(
             auth_string = f"user={settings.GOOGLE_USER}\1auth=Bearer {access_token}\1\1"
             auth_b64 = base64.b64encode(auth_string.encode("utf-8")).decode("utf-8")
 
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as server:
+            with IPv4SMTP("smtp.gmail.com", 587, timeout=15) as server:
                 server.ehlo()
                 server.starttls()
                 server.ehlo()
@@ -223,37 +272,52 @@ def _send_smtp_email_sync(
             else:
                 host = "smtp.gmail.com"
 
-        port = int(settings.SMTP_PORT) if settings.SMTP_PORT else 587
-        logger.info("Provider: SMTP (%s:%s as %s)", host, port, mask_recipient(smtp_user))
+        primary_port = int(settings.SMTP_PORT) if settings.SMTP_PORT else 587
+        
+        # Build candidate connection attempts: primary first, alternative fallback second
+        connection_attempts = []
+        if primary_port == 465:
+            connection_attempts.append((465, True, "SSL"))
+            connection_attempts.append((587, False, "STARTTLS"))
+        else:
+            connection_attempts.append((587, False, "STARTTLS"))
+            connection_attempts.append((465, True, "SSL"))
 
-        try:
-            if port == 465:
-                with smtplib.SMTP_SSL(host, port, timeout=15) as server:
-                    server.ehlo()
-                    server.login(smtp_user, smtp_password)
-                    server.sendmail(sender, [recipient], msg.as_string())
-            else:
-                with smtplib.SMTP(host, port, timeout=15) as server:
-                    server.ehlo()
-                    if settings.SMTP_TLS:
-                        server.starttls()
+        logger.info("Provider: SMTP (%s:%s as %s)", host, primary_port, mask_recipient(smtp_user))
+
+        for port, is_ssl, mode in connection_attempts:
+            try:
+                if is_ssl:
+                    with IPv4SMTP_SSL(host, port, timeout=15) as server:
                         server.ehlo()
-                    server.login(smtp_user, smtp_password)
-                    server.sendmail(sender, [recipient], msg.as_string())
+                        server.login(smtp_user, smtp_password)
+                        server.sendmail(sender, [recipient], msg.as_string())
+                else:
+                    with IPv4SMTP(host, port, timeout=15) as server:
+                        server.ehlo()
+                        if settings.SMTP_TLS:
+                            server.starttls()
+                            server.ehlo()
+                        server.login(smtp_user, smtp_password)
+                        server.sendmail(sender, [recipient], msg.as_string())
 
-            logger.info("Email delivery status: 200 (Delivered to %s via SMTP %s:%s)", masked, host, port)
-            return True
-        except smtplib.SMTPAuthenticationError as auth_err:
-            if "smtp.gmail.com" in host.lower():
-                logger.error(
-                    "Gmail SMTP authentication failed for %s. Google requires a 16-character App Password (with 2-Step Verification enabled). Normal Gmail account passwords are rejected. Error: %s",
-                    mask_recipient(smtp_user),
-                    auth_err,
-                )
-            else:
-                logger.error("SMTP authentication failed for %s on %s: %s", mask_recipient(smtp_user), host, auth_err)
-        except Exception as e:
-            logger.error("SMTP delivery failed for recipient %s on %s:%s: %s", masked, host, port, str(e).splitlines()[0])
+                logger.info("Email delivery status: 200 (Delivered to %s via IPv4 SMTP %s:%s [%s])", masked, host, port, mode)
+                return True
+            except smtplib.SMTPAuthenticationError as auth_err:
+                if "smtp.gmail.com" in host.lower():
+                    logger.error(
+                        "Gmail SMTP authentication failed for %s. Google requires a 16-character App Password (with 2-Step Verification enabled). Normal Gmail account passwords are rejected. Error: %s",
+                        mask_recipient(smtp_user),
+                        auth_err,
+                    )
+                else:
+                    logger.error("SMTP authentication failed for %s on %s: %s", mask_recipient(smtp_user), host, auth_err)
+                return False  # Authentication error won't be fixed by changing port
+            except Exception as e:
+                logger.warning("SMTP delivery attempt on %s:%s [%s] failed: %s. Trying next candidate...", host, port, mode, str(e).splitlines()[0])
+                continue
+
+        logger.error("All IPv4 SMTP connection attempts to %s (ports 587 & 465) failed for %s", host, masked)
 
     # 3. Development Mode Simulation fallback
     if not settings.is_production:
