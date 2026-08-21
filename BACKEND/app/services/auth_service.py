@@ -154,10 +154,12 @@ class AuthService:
         self,
         email: str,
         otp: str,
+        ip: Optional[str] = None,
+        user_agent: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Verifies the user's email using the 6-digit OTP.
-        Marks the user as verified.
+        Verifies the user's email using the 6-digit OTP,
+        marks the user as verified, and creates an authenticated session.
         """
         clean_email = email.strip().lower()
         is_valid, err_msg, user_id = await self.otp_service.verify_otp(
@@ -187,16 +189,19 @@ class AuthService:
         # Mark user as verified
         updated_user = await self.user_repo.mark_verified(user["id"])
 
+        # Create session + tokens for auto-login
+        access_token, refresh_token, user_resp = await self.login_with_oauth(
+            user=updated_user,
+            ip=ip,
+            user_agent=user_agent,
+        )
+
         return {
-            "message": "Email verified successfully. You may now sign in to your DISHA account.",
-            "user": {
-                "id": updated_user["id"],
-                "username": updated_user["username"],
-                "email": updated_user["email"],
-                "verified": True,
-                "name": updated_user.get("name"),
-                "city": updated_user.get("city"),
-            },
+            "message": "Email verified successfully.",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user": user_resp,
         }
 
     async def resend_otp(self, email: str) -> Dict[str, Any]:

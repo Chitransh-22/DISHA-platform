@@ -1,15 +1,14 @@
 import React from 'react';
-import { X, ShieldAlert, Phone, Users, Clock, MapPin, Radio, Navigation } from 'lucide-react';
-import { getCategoryConfig } from '../../../config/eventConfig';
+import { X, ShieldAlert, Users, Clock, MapPin, Radio, Navigation, CheckCircle } from 'lucide-react';
+import { getCategoryConfig, SEVERITY_CONFIG } from '../../../config/eventConfig';
+import { formatDateTimeIST } from '../../../utils/dateTime';
 
 export const IncidentDetailModal = ({ incident, onClose, onFindNearbyServices }) => {
   if (!incident) return null;
 
   const config = getCategoryConfig(incident.category || incident.type || incident.disaster_type);
-
-  const timeDisplay =
-    incident.timeAgo ||
-    (incident.date && incident.time ? `${incident.date} at ${incident.time}` : 'Verified Feed');
+  const sevConfig = SEVERITY_CONFIG[incident.severity] || SEVERITY_CONFIG.Moderate;
+  const istTimeString = formatDateTimeIST(incident);
 
   return (
     <div
@@ -34,15 +33,7 @@ export const IncidentDetailModal = ({ incident, onClose, onFindNearbyServices })
                   <span>{config.icon}</span>
                   <span>{config.label}</span>
                 </span>
-                <span
-                  className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                    incident.severity === 'Critical'
-                      ? 'bg-red-500/20 text-red-400 border border-red-500/40'
-                      : incident.severity === 'Severe'
-                      ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40'
-                      : 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40'
-                  }`}
-                >
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${sevConfig.badge}`}>
                   {incident.severity || 'Moderate'} Severity
                 </span>
               </div>
@@ -79,45 +70,25 @@ export const IncidentDetailModal = ({ incident, onClose, onFindNearbyServices })
             <div className="flex items-start gap-2">
               <Clock className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
               <div>
-                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Time Ingested</p>
-                <p className="text-xs sm:text-sm font-bold text-slate-900">{timeDisplay}</p>
+                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Reported Time</p>
+                <p className="text-xs sm:text-sm font-bold text-slate-900">{istTimeString}</p>
               </div>
             </div>
           </div>
 
-          {/* Description */}
+          {/* Situation Briefing */}
           <div>
             <h4 className="text-xs uppercase font-bold text-slate-400 tracking-wider mb-1.5">Situation Brief</h4>
-            <p className="text-sm leading-relaxed text-slate-600 bg-orange-50/50 p-3.5 rounded-xl border border-orange-100">
+            <p className="text-sm leading-relaxed text-slate-700 bg-orange-50/40 p-3.5 rounded-xl border border-orange-100/80">
               {incident.description || 'Verified real-time disaster situation report.'}
             </p>
           </div>
 
           {/* Source Authority Badge */}
           {incident.source_label && (
-            <div className="flex items-center gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+            <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
               <span className="text-slate-500 font-semibold">Reporting Source:</span>
               <span className="font-bold text-slate-800">{incident.source_label}</span>
-            </div>
-          )}
-
-          {/* Response Units Deployed */}
-          {incident.response_units && incident.response_units.length > 0 && (
-            <div>
-              <h4 className="text-xs uppercase font-bold text-slate-400 tracking-wider mb-1.5 flex items-center gap-1.5">
-                <Radio className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Active Response Units</span>
-              </h4>
-              <div className="flex flex-wrap gap-1.5">
-                {incident.response_units.map((unit, idx) => (
-                  <span
-                    key={idx}
-                    className="text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-lg"
-                  >
-                    ✓ {unit}
-                  </span>
-                ))}
-              </div>
             </div>
           )}
 
@@ -128,29 +99,23 @@ export const IncidentDetailModal = ({ incident, onClose, onFindNearbyServices })
               className="w-full bg-linear-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-sm py-3 px-4 rounded-xl transition-all duration-150 shadow-md flex items-center justify-center gap-2 cursor-pointer"
             >
               <Navigation className="w-4 h-4" />
-              <span>Discover Nearby Emergency Services</span>
+              <span>Discover Nearby Emergency Facilities</span>
               <span>→</span>
             </button>
           )}
 
-          {/* Emergency Helpline */}
-          <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <Phone className="w-4 h-4 text-red-600" />
-              <div>
-                <p className="text-[11px] font-semibold text-red-700 uppercase">Emergency Helpline</p>
-                <p className="text-xs sm:text-sm font-bold text-red-950 font-mono">
-                  {incident.helpline || '1070 / 112'}
-                </p>
-              </div>
-            </div>
+          {/* Directions Button */}
+          {incident.latitude != null && incident.longitude != null && (
             <a
-              href={`tel:${(incident.helpline || '1070').split('/')[0].trim()}`}
-              className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm"
+              href={`https://www.google.com/maps/dir/?api=1&destination=${incident.latitude},${incident.longitude}`}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
             >
-              Call Helpline
+              <Navigation className="w-3.5 h-3.5 text-orange-600" />
+              <span>Get Directions on Google Maps ↗</span>
             </a>
-          </div>
+          )}
 
         </div>
 

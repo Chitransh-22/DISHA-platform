@@ -232,7 +232,7 @@ const OTPPanel = ({ email, onVerified, onBack }) => {
 
     try {
       const res = await verifyEmail({ email, otp: entered });
-      onVerified(res?.user?.name || res?.user?.username || email.split('@')[0]);
+      onVerified(res?.user?.name || res?.user?.username || email.split('@')[0], res?.user);
     } catch (err) {
       setError(err.message || 'Incorrect verification code. Please try again.');
       setDigits(['', '', '', '', '', '']);
@@ -526,9 +526,8 @@ export const AuthPage = ({ onNavigate, onLoginSuccess, redirectTarget = 'landing
     if (onLoginSuccess) onLoginSuccess(userObj);
   };
 
-  const handleOTPVerified = (name) => {
-    // After email verification, switch to sign-in tab with verified notice
-    setScreen('signin');
+  const handleOTPVerified = (name, userObj) => {
+    handleAuthSuccess(name, userObj);
   };
 
   const handleGoogleAuth = () => {

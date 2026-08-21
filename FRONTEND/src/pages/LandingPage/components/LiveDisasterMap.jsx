@@ -26,6 +26,7 @@ import {
 import { fetchEvents, fetchNearbyEmergencyServices } from '../../../services/api';
 import { IncidentDetailModal } from './IncidentDetailModal';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../../../config/eventConfig';
+import { formatDateTimeIST } from '../../../utils/dateTime';
 
 export const LiveDisasterMap = () => {
   const mapContainerRef = useRef(null);
@@ -428,7 +429,7 @@ export const LiveDisasterMap = () => {
           <div>
             <h4 class="text-sm font-bold text-white leading-snug">${ev.title || 'Incident'}</h4>
             <p class="text-[11px] text-slate-400 mt-0.5">📍 ${ev.location || ''}${ev.state ? ` (${ev.state})` : ''}</p>
-            <p class="text-[10px] text-slate-500 mt-0.5">🕒 ${ev.date} • ${ev.time}</p>
+            <p class="text-[10px] text-slate-400 mt-0.5 font-medium">🕒 ${formatDateTimeIST(ev)}</p>
             <span class="inline-block mt-1 text-[9.5px] font-bold text-cyan-300 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-800/50">
               Source: ${ev.source_label || ev.source}
             </span>
@@ -1054,8 +1055,8 @@ export const LiveDisasterMap = () => {
                       <MapPin className="w-3 h-3 text-orange-400 shrink-0" />
                       <span>{selectedEvent.location || selectedEvent.state || 'Incident Area'}</span>
                     </p>
-                    <div className="flex items-center gap-2 mt-1.5 text-[10.5px] text-slate-400 font-mono">
-                      <span>🕒 {selectedEvent.date} {selectedEvent.time ? `• ${selectedEvent.time}` : ''}</span>
+                    <div className="flex items-center gap-2 mt-1.5 text-[11px] text-slate-300">
+                      <span>🕒 {formatDateTimeIST(selectedEvent)}</span>
                     </div>
                   </div>
 
