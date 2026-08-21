@@ -165,7 +165,7 @@ def _send_smtp_email_sync(
     html_content: str,
     otp: Optional[str] = None,
 ) -> bool:
-    """Synchronous SMTP email delivery with diagnostic logging."""
+    """Synchronous SMTP email delivery with robust provider fallback and diagnostic logging."""
     masked = mask_recipient(recipient)
     sender = settings.SMTP_FROM or settings.SMTP_USER or settings.GOOGLE_USER or "no-reply@disha.gov.in"
     msg = MIMEMultipart("alternative")
@@ -176,12 +176,11 @@ def _send_smtp_email_sync(
     part = MIMEText(html_content, "html")
     msg.attach(part)
 
-    logger.info("OTP delivery request received for recipient: %s", masked)
+    logger.info("OTP delivery request initiated for recipient: %s", masked)
 
-    # 1. Check Google OAuth2 credentials
+    # 1. Check Google OAuth2 / XOAUTH2 credentials
     if settings.GOOGLE_USER and settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET and settings.GOOGLE_REFRESH_TOKEN:
         logger.info("Provider: Google Gmail OAuth2 (XOAUTH2)")
-        logger.info("Provider request started...")
         try:
             import google.auth.transport.requests
             from google.oauth2.credentials import Credentials
@@ -200,48 +199,74 @@ def _send_smtp_email_sync(
             auth_string = f"user={settings.GOOGLE_USER}\1auth=Bearer {access_token}\1\1"
             auth_b64 = base64.b64encode(auth_string.encode("utf-8")).decode("utf-8")
 
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as server:
                 server.ehlo()
                 server.starttls()
                 server.ehlo()
                 server.docmd("AUTH", "XOAUTH2 " + auth_b64)
                 server.sendmail(settings.GOOGLE_USER, [recipient], msg.as_string())
 
-            logger.info("Provider response status: 200 (Delivered via Gmail OAuth2)")
+            logger.info("Email delivery status: 200 (Delivered to %s via Gmail XOAUTH2)", masked)
             return True
         except Exception as e:
-            logger.error("Provider response status: FAILED - Gmail OAuth2 error: %s", str(e).splitlines()[0])
+            logger.error("Gmail XOAUTH2 delivery failed for %s: %s", masked, str(e).splitlines()[0])
 
-    # 2. Check standard SMTP credentials
-    if settings.SMTP_HOST and settings.SMTP_USER and settings.SMTP_PASSWORD:
-        logger.info("Provider: Standard SMTP (%s:%s)", settings.SMTP_HOST, settings.SMTP_PORT)
-        logger.info("Provider request started...")
+    # 2. Check standard SMTP / Gmail App Password credentials
+    smtp_user = settings.SMTP_USER or settings.GOOGLE_USER
+    smtp_password = settings.SMTP_PASSWORD
+
+    if smtp_user and smtp_password:
+        host = settings.SMTP_HOST
+        if not host:
+            if "@gmail.com" in smtp_user.lower() or "@googlemail.com" in smtp_user.lower():
+                host = "smtp.gmail.com"
+            else:
+                host = "smtp.gmail.com"
+
+        port = int(settings.SMTP_PORT) if settings.SMTP_PORT else 587
+        logger.info("Provider: SMTP (%s:%s as %s)", host, port, mask_recipient(smtp_user))
+
         try:
-            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
-                server.ehlo()
-                if settings.SMTP_TLS:
-                    server.starttls()
+            if port == 465:
+                with smtplib.SMTP_SSL(host, port, timeout=15) as server:
                     server.ehlo()
-                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                server.sendmail(sender, [recipient], msg.as_string())
+                    server.login(smtp_user, smtp_password)
+                    server.sendmail(sender, [recipient], msg.as_string())
+            else:
+                with smtplib.SMTP(host, port, timeout=15) as server:
+                    server.ehlo()
+                    if settings.SMTP_TLS:
+                        server.starttls()
+                        server.ehlo()
+                    server.login(smtp_user, smtp_password)
+                    server.sendmail(sender, [recipient], msg.as_string())
 
-            logger.info("Provider response status: 200 (Delivered via SMTP)")
+            logger.info("Email delivery status: 200 (Delivered to %s via SMTP %s:%s)", masked, host, port)
             return True
+        except smtplib.SMTPAuthenticationError as auth_err:
+            if "smtp.gmail.com" in host.lower():
+                logger.error(
+                    "Gmail SMTP authentication failed for %s. Google requires a 16-character App Password (with 2-Step Verification enabled). Normal Gmail account passwords are rejected. Error: %s",
+                    mask_recipient(smtp_user),
+                    auth_err,
+                )
+            else:
+                logger.error("SMTP authentication failed for %s on %s: %s", mask_recipient(smtp_user), host, auth_err)
         except Exception as e:
-            logger.error("Provider response status: FAILED - SMTP error: %s", str(e).splitlines()[0])
+            logger.error("SMTP delivery failed for recipient %s on %s:%s: %s", masked, host, port, str(e).splitlines()[0])
 
-    # 3. Development Mode fallback
-    is_dev = settings.ENVIRONMENT == "development" or settings.DEBUG or not settings.is_production
-    if is_dev:
-        logger.info("Provider: Development Mode Simulation")
-        logger.info("[EmailService][DEV MODE] Verification OTP code generated for %s (Subject: '%s')", masked, subject)
-        logger.info("Provider response status: 200 (Logged to local console for developer testing)")
-    else:
-        logger.warning(
-            "Provider: UNCONFIGURED. Outbound SMTP / Gmail credentials are not configured in production environment."
-        )
+    # 3. Development Mode Simulation fallback
+    if not settings.is_production:
+        logger.info("Provider: Local Development Console Simulation")
+        logger.info("[EmailService][DEV MODE] Verification OTP generated for %s (Subject: '%s')", masked, subject)
+        return True
 
-    return True
+    # 4. Production unconfigured / failure warning
+    logger.error(
+        "Email delivery failed in production: No valid SMTP credentials configured or delivery failed. "
+        "Please ensure SMTP_USER, SMTP_PASSWORD (or GMAIL_APP_PASSWORD), and SMTP_HOST are configured in the deployment environment."
+    )
+    return False
 
 
 async def send_verification_email(

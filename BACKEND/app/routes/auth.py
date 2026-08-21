@@ -91,25 +91,10 @@ oauth.register(
 
 def _get_google_redirect_uri(request: Request) -> str:
     """
-    Computes the redirect URI for Google OAuth.
-    Prioritizes explicit GOOGLE_REDIRECT_URI environment variable if configured.
-    Falls back to generating dynamic URL from the request, respecting reverse proxy HTTPS headers.
+    Computes the canonical redirect URI for Google OAuth.
+    Delegates to Centralized Settings with production guardrails.
     """
-    if settings.GOOGLE_REDIRECT_URI and settings.GOOGLE_REDIRECT_URI.strip():
-        return settings.GOOGLE_REDIRECT_URI.strip()
-
-    callback_url = str(request.url_for("google_callback"))
-    if not callback_url.endswith("/"):
-        callback_url += "/"
-
-    # If backend is deployed behind HTTPS proxy (e.g. Render, AWS, Nginx),
-    # ensure redirect URI uses https scheme so Google Cloud Console accepts it.
-    forwarded_proto = request.headers.get("x-forwarded-proto", "").lower()
-    if forwarded_proto == "https" or settings.is_production or settings.COOKIE_SECURE:
-        if callback_url.startswith("http://"):
-            callback_url = "https://" + callback_url[len("http://") :]
-
-    return callback_url
+    return settings.get_effective_google_redirect_uri(request)
 
 
 # ============================================================
@@ -126,7 +111,7 @@ async def google_login(request: Request):
     Initiates Google OAuth2 / OpenID Connect login flow.
     Redirects the user's browser to Google's consent screen.
     """
-    frontend_url = settings.FRONTEND_URL.rstrip("/")
+    frontend_url = settings.get_effective_frontend_url(request)
     if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
         logger.error(
             "Google OAuth login attempted but GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing."
@@ -196,7 +181,7 @@ async def google_callback(
     5. Issues DISHA JWT access token & sets HTTP-Only refresh cookie.
     6. Redirects browser back to frontend with the access token.
     """
-    frontend_url = settings.FRONTEND_URL.rstrip("/")
+    frontend_url = settings.get_effective_frontend_url(request)
 
     # 1. Handle error response directly from Google
     oauth_error = request.query_params.get("error")
