@@ -3,18 +3,14 @@ DISHA Platform - Verification Email Delivery Service
 Disaster Intelligence and Situational Hazard Awareness Platform
 
 Supports:
-1. Google OAuth2 / Gmail API / XOAUTH2 Delivery
-2. Standard SMTP Delivery (TLS/SSL)
-3. Development Console Simulation (when credentials not configured)
+1. Brevo (Sendinblue) Transactional HTTPS API Delivery
+2. Development Console Simulation (when credentials not configured)
 """
 
 import asyncio
-import base64
 import logging
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import Optional
+import httpx
 
 from app.core.config import settings
 
@@ -159,178 +155,124 @@ def generate_disha_email_html(otp: str, username: Optional[str] = None) -> str:
 </html>"""
 
 
-import socket
-
-def _create_ipv4_socket(host: str, port: int, timeout: float = 15.0) -> socket.socket:
-    """
-    Creates an IPv4-only TCP socket connection.
-    Prevents [Errno 101] Network is unreachable on cloud container platforms (like Render)
-    where dual-stack DNS resolves IPv6 (AAAA records) first, but the container lacks IPv6 egress routes.
-    """
-    try:
-        addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-    except socket.gaierror as dns_err:
-        raise OSError(f"DNS resolution failed for {host}:{port} (IPv4): {dns_err}") from dns_err
-
-    if not addr_info:
-        raise OSError(f"No IPv4 address records found for {host}")
-
-    last_exc = None
-    for _, _, proto, _, sa in addr_info:
-        sock = None
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, proto)
-            sock.settimeout(timeout)
-            sock.connect(sa)
-            return sock
-        except OSError as exc:
-            last_exc = exc
-            if sock is not None:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
-
-    raise last_exc or OSError(f"Failed to connect to {host}:{port} via IPv4")
-
-
-class IPv4SMTP(smtplib.SMTP):
-    """SMTP client that forces IPv4 socket connection."""
-    def _get_socket(self, host, port, timeout):
-        return _create_ipv4_socket(host, port, timeout)
-
-
-class IPv4SMTP_SSL(smtplib.SMTP_SSL):
-    """SMTP_SSL client that forces IPv4 socket connection."""
-    def _get_socket(self, host, port, timeout):
-        raw_sock = _create_ipv4_socket(host, port, timeout)
-        server_hostname = self._host if self._host else host
-        return self.context.wrap_socket(raw_sock, server_hostname=server_hostname)
-
-
-def _send_smtp_email_sync(
+def _send_brevo_email_sync(
     recipient: str,
     subject: str,
     html_content: str,
     otp: Optional[str] = None,
+    username: Optional[str] = None,
 ) -> bool:
-    """Synchronous SMTP email delivery with robust provider fallback and diagnostic logging."""
+    """Synchronous Brevo HTTPS API delivery helper."""
     masked = mask_recipient(recipient)
-    sender = settings.SMTP_FROM or settings.SMTP_USER or settings.GOOGLE_USER or "no-reply@disha.gov.in"
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = f"DISHA Platform <{sender}>"
-    msg["To"] = recipient
-
-    part = MIMEText(html_content, "html")
-    msg.attach(part)
-
     logger.info("OTP delivery request initiated for recipient: %s", masked)
 
-    # 1. Check Google OAuth2 / XOAUTH2 credentials
-    if settings.GOOGLE_USER and settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET and settings.GOOGLE_REFRESH_TOKEN:
-        logger.info("Provider: Google Gmail OAuth2 (XOAUTH2)")
+    # 1. Brevo HTTPS API delivery
+    if settings.BREVO_API_KEY:
+        sender_email = (
+            settings.BREVO_SENDER_EMAIL
+            or settings.SMTP_FROM
+            or settings.SMTP_USER
+            or "no-reply@disha.gov.in"
+        )
+        sender_name = settings.BREVO_SENDER_NAME or "DISHA Platform"
+
+        logger.info(
+            "Provider: Brevo HTTPS API (Endpoint: https://api.brevo.com/v3/smtp/email as '%s' <%s>)",
+            sender_name,
+            sender_email,
+        )
+
+        headers = {
+            "api-key": settings.BREVO_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+        payload = {
+            "sender": {
+                "name": sender_name,
+                "email": sender_email,
+            },
+            "to": [
+                {
+                    "email": recipient,
+                    "name": username or "User",
+                }
+            ],
+            "subject": subject,
+            "htmlContent": html_content,
+        }
+
         try:
-            import google.auth.transport.requests
-            from google.oauth2.credentials import Credentials
+            with httpx.Client(timeout=15.0) as client:
+                res = client.post(
+                    "https://api.brevo.com/v3/smtp/email",
+                    headers=headers,
+                    json=payload,
+                )
 
-            creds = Credentials(
-                None,
-                refresh_token=settings.GOOGLE_REFRESH_TOKEN,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=settings.GOOGLE_CLIENT_ID,
-                client_secret=settings.GOOGLE_CLIENT_SECRET,
-            )
-            request = google.auth.transport.requests.Request()
-            creds.refresh(request)
-            access_token = creds.token
-
-            auth_string = f"user={settings.GOOGLE_USER}\1auth=Bearer {access_token}\1\1"
-            auth_b64 = base64.b64encode(auth_string.encode("utf-8")).decode("utf-8")
-
-            with IPv4SMTP("smtp.gmail.com", 587, timeout=15) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.docmd("AUTH", "XOAUTH2 " + auth_b64)
-                server.sendmail(settings.GOOGLE_USER, [recipient], msg.as_string())
-
-            logger.info("Email delivery status: 200 (Delivered to %s via Gmail XOAUTH2)", masked)
-            return True
-        except Exception as e:
-            logger.error("Gmail XOAUTH2 delivery failed for %s: %s", masked, str(e).splitlines()[0])
-
-    # 2. Check standard SMTP / Gmail App Password credentials
-    smtp_user = settings.SMTP_USER or settings.GOOGLE_USER
-    smtp_password = settings.SMTP_PASSWORD
-
-    if smtp_user and smtp_password:
-        host = settings.SMTP_HOST
-        if not host:
-            if "@gmail.com" in smtp_user.lower() or "@googlemail.com" in smtp_user.lower():
-                host = "smtp.gmail.com"
-            else:
-                host = "smtp.gmail.com"
-
-        primary_port = int(settings.SMTP_PORT) if settings.SMTP_PORT else 587
-        
-        # Build candidate connection attempts: primary first, alternative fallback second
-        connection_attempts = []
-        if primary_port == 465:
-            connection_attempts.append((465, True, "SSL"))
-            connection_attempts.append((587, False, "STARTTLS"))
-        else:
-            connection_attempts.append((587, False, "STARTTLS"))
-            connection_attempts.append((465, True, "SSL"))
-
-        logger.info("Provider: SMTP (%s:%s as %s)", host, primary_port, mask_recipient(smtp_user))
-
-        for port, is_ssl, mode in connection_attempts:
-            try:
-                if is_ssl:
-                    with IPv4SMTP_SSL(host, port, timeout=15) as server:
-                        server.ehlo()
-                        server.login(smtp_user, smtp_password)
-                        server.sendmail(sender, [recipient], msg.as_string())
-                else:
-                    with IPv4SMTP(host, port, timeout=15) as server:
-                        server.ehlo()
-                        if settings.SMTP_TLS:
-                            server.starttls()
-                            server.ehlo()
-                        server.login(smtp_user, smtp_password)
-                        server.sendmail(sender, [recipient], msg.as_string())
-
-                logger.info("Email delivery status: 200 (Delivered to %s via IPv4 SMTP %s:%s [%s])", masked, host, port, mode)
+            if res.status_code in (200, 201, 202):
+                logger.info(
+                    "Email delivery status: %s (Delivered to %s via Brevo HTTPS API)",
+                    res.status_code,
+                    masked,
+                )
                 return True
-            except smtplib.SMTPAuthenticationError as auth_err:
-                if "smtp.gmail.com" in host.lower():
-                    logger.error(
-                        "Gmail SMTP authentication failed for %s. Google requires a 16-character App Password (with 2-Step Verification enabled). Normal Gmail account passwords are rejected. Error: %s",
-                        mask_recipient(smtp_user),
-                        auth_err,
-                    )
-                else:
-                    logger.error("SMTP authentication failed for %s on %s: %s", mask_recipient(smtp_user), host, auth_err)
-                return False  # Authentication error won't be fixed by changing port
-            except Exception as e:
-                logger.warning("SMTP delivery attempt on %s:%s [%s] failed: %s. Trying next candidate...", host, port, mode, str(e).splitlines()[0])
-                continue
 
-        logger.error("All IPv4 SMTP connection attempts to %s (ports 587 & 465) failed for %s", host, masked)
+            try:
+                err_data = res.json()
+                code = err_data.get("code", f"HTTP_{res.status_code}")
+                msg = err_data.get("message", res.text[:200])
+            except Exception:
+                code = f"HTTP_{res.status_code}"
+                msg = res.text[:200]
 
-    # 3. Development Mode Simulation fallback
+            logger.error(
+                "Brevo HTTPS API delivery failed for %s (Status: %s, Code: '%s'): %s",
+                masked,
+                res.status_code,
+                code,
+                msg,
+            )
+
+            if res.status_code in (400, 401, 403) or "sender" in msg.lower():
+                logger.warning(
+                    "Note: Ensure the sender email '%s' is registered and verified in your Brevo account (https://app.brevo.com/senders).",
+                    sender_email,
+                )
+            return False
+
+        except httpx.RequestError as exc:
+            logger.error(
+                "Brevo HTTPS API connection error for %s: %s",
+                masked,
+                str(exc).splitlines()[0],
+            )
+            return False
+        except Exception as exc:
+            logger.exception("Unexpected error dispatching email via Brevo HTTPS API: %s", exc)
+            return False
+
+    # 2. Development Mode Simulation fallback
     if not settings.is_production:
         logger.info("Provider: Local Development Console Simulation")
-        logger.info("[EmailService][DEV MODE] Verification OTP generated for %s (Subject: '%s')", masked, subject)
+        logger.info(
+            "[EmailService][DEV MODE] Verification OTP generated for %s (Subject: '%s')",
+            masked,
+            subject,
+        )
         return True
 
-    # 4. Production unconfigured / failure warning
+    # 3. Production unconfigured warning
     logger.error(
-        "Email delivery failed in production: No valid SMTP credentials configured or delivery failed. "
-        "Please ensure SMTP_USER, SMTP_PASSWORD (or GMAIL_APP_PASSWORD), and SMTP_HOST are configured in the deployment environment."
+        "Email delivery failed in production: BREVO_API_KEY is not configured. "
+        "Please add BREVO_API_KEY, BREVO_SENDER_EMAIL, and BREVO_SENDER_NAME to your Render dashboard."
     )
     return False
+
+
+# Legacy alias for backward compatibility with existing unit test fixtures
+_send_smtp_email_sync = _send_brevo_email_sync
 
 
 async def send_verification_email(
@@ -339,17 +281,114 @@ async def send_verification_email(
     username: Optional[str] = None,
 ) -> bool:
     """
-    Sends a verification OTP email asynchronously to the user.
+    Sends a verification OTP email asynchronously using the Brevo HTTPS Transactional API.
     """
+    masked = mask_recipient(email)
     subject = f"DISHA Verification Code: {otp}"
     html = generate_disha_email_html(otp=otp, username=username)
 
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None,
-        _send_smtp_email_sync,
-        email,
-        subject,
-        html,
-        otp,
+    logger.info("OTP delivery request initiated for recipient: %s", masked)
+
+    # 1. Brevo HTTPS Transactional API Delivery
+    if settings.BREVO_API_KEY:
+        sender_email = (
+            settings.BREVO_SENDER_EMAIL
+            or settings.SMTP_FROM
+            or settings.SMTP_USER
+            or "no-reply@disha.gov.in"
+        )
+        sender_name = settings.BREVO_SENDER_NAME or "DISHA Platform"
+
+        logger.info(
+            "Provider: Brevo HTTPS API (Endpoint: https://api.brevo.com/v3/smtp/email as '%s' <%s>)",
+            sender_name,
+            sender_email,
+        )
+
+        headers = {
+            "api-key": settings.BREVO_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+        payload = {
+            "sender": {
+                "name": sender_name,
+                "email": sender_email,
+            },
+            "to": [
+                {
+                    "email": email,
+                    "name": username or "User",
+                }
+            ],
+            "subject": subject,
+            "htmlContent": html,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(
+                    "https://api.brevo.com/v3/smtp/email",
+                    headers=headers,
+                    json=payload,
+                )
+
+            if res.status_code in (200, 201, 202):
+                logger.info(
+                    "Email delivery status: %s (Delivered to %s via Brevo HTTPS API)",
+                    res.status_code,
+                    masked,
+                )
+                return True
+
+            try:
+                err_data = res.json()
+                code = err_data.get("code", f"HTTP_{res.status_code}")
+                msg = err_data.get("message", res.text[:200])
+            except Exception:
+                code = f"HTTP_{res.status_code}"
+                msg = res.text[:200]
+
+            logger.error(
+                "Brevo HTTPS API delivery failed for %s (Status: %s, Code: '%s'): %s",
+                masked,
+                res.status_code,
+                code,
+                msg,
+            )
+
+            if res.status_code in (400, 401, 403) or "sender" in msg.lower():
+                logger.warning(
+                    "Note: Ensure the sender email '%s' is registered and verified in your Brevo account (https://app.brevo.com/senders).",
+                    sender_email,
+                )
+            return False
+
+        except httpx.RequestError as exc:
+            logger.error(
+                "Brevo HTTPS API connection error for %s: %s",
+                masked,
+                str(exc).splitlines()[0],
+            )
+            return False
+        except Exception as exc:
+            logger.exception("Unexpected error dispatching email via Brevo HTTPS API: %s", exc)
+            return False
+
+    # 2. Development Mode Simulation fallback
+    if not settings.is_production:
+        logger.info("Provider: Local Development Console Simulation")
+        logger.info(
+            "[EmailService][DEV MODE] Verification OTP generated for %s (Subject: '%s')",
+            masked,
+            subject,
+        )
+        return True
+
+    # 3. Production unconfigured warning
+    logger.error(
+        "Email delivery failed in production: BREVO_API_KEY is not configured. "
+        "Please add BREVO_API_KEY, BREVO_SENDER_EMAIL, and BREVO_SENDER_NAME to your Render dashboard."
     )
+    return False
