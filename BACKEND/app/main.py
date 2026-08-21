@@ -119,6 +119,10 @@ async def root():
 
 @app.get("/health", tags=["Health"], summary="Health Check")
 @app.get("/api/health", tags=["Health"], summary="API Health Check")
+@app.head("/api/health", tags=["Health"], summary="API Health Check")
+@app.head("/health", tags=["Health"], summary="API Health Check")
+
+
 async def health():
     return {
         "status": "ok",
