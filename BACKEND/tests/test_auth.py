@@ -572,3 +572,55 @@ def test_email_service_masking_and_fallbacks():
     assert res is True
 
 
+@pytest.mark.asyncio
+async def test_google_oauth_state_origin_preservation(monkeypatch):
+    """
+    Tests that Google OAuth login preserves frontend origin in state,
+    and callback redirects directly back to that origin.
+    """
+    import base64
+    from app.routes.auth import oauth
+
+    ts = int(time.time())
+    mock_email = f"state_test_{ts}@disha-test.gov.in"
+    mock_google_id = f"g_sub_state_{ts}"
+
+    mock_token = {
+        "access_token": f"mock_token_{ts}",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "userinfo": {
+            "sub": mock_google_id,
+            "email": mock_email,
+            "name": "State Test User",
+            "email_verified": True,
+        },
+    }
+
+    async def mock_authorize_access_token(request):
+        return mock_token
+
+    monkeypatch.setattr(oauth.google, "authorize_access_token", mock_authorize_access_token)
+
+    # 1. State with production Vercel origin
+    prod_origin = "https://disha-platform.vercel.app"
+    raw_state = "csrf_token_123"
+    state_payload = base64.urlsafe_b64encode(f"{raw_state}|{prod_origin}".encode("utf-8")).decode("utf-8")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", follow_redirects=False) as client:
+        res = await client.get(f"/api/auth/google/callback?code=mock_code&state={state_payload}")
+        assert res.status_code == 302
+        location = res.headers.get("location")
+        assert location.startswith(f"{prod_origin}/auth/google/success")
+
+        # Cleanup
+        user_repo = UserRepository()
+        session_repo = SessionRepository()
+        user = await user_repo.get_by_email(mock_email)
+        if user:
+            await user_repo.collection.delete_one({"email": mock_email})
+            await session_repo.collection.delete_many({"user_id": user["id"]})
+
+
+

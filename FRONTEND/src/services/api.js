@@ -518,10 +518,12 @@ export const getAuthHeaders = (extraHeaders = {}) => {
  */
 export const authGoogleLoginUrl = () => {
   const baseUrl = getApiBaseUrl();
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const param = currentOrigin ? `?origin=${encodeURIComponent(currentOrigin)}` : '';
   if (baseUrl) {
-    return `${baseUrl}/api/auth/google/login`;
+    return `${baseUrl}/api/auth/google/login${param}`;
   }
-  return '/api/auth/google/login';
+  return `/api/auth/google/login${param}`;
 };
 
 /**

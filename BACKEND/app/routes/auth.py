@@ -15,6 +15,7 @@ Implements RESTful endpoints for:
 - POST /api/auth/logout-all
 """
 
+import base64
 import logging
 import secrets
 from typing import Any, Dict, Optional
@@ -111,7 +112,21 @@ async def google_login(request: Request):
     Initiates Google OAuth2 / OpenID Connect login flow.
     Redirects the user's browser to Google's consent screen.
     """
-    frontend_url = settings.get_effective_frontend_url(request)
+    # 1. Resolve frontend return origin from request query or settings
+    requested_origin = request.query_params.get("origin") or request.query_params.get("frontend_url")
+    if requested_origin:
+        requested_origin = requested_origin.strip().rstrip("/")
+        if any(
+            requested_origin.startswith(allowed) or requested_origin == allowed
+            for allowed in settings.cors_origins_list
+            if allowed != "*"
+        ) or requested_origin.endswith(".vercel.app") or "localhost" in requested_origin or "127.0.0.1" in requested_origin:
+            frontend_url = requested_origin
+        else:
+            frontend_url = settings.get_effective_frontend_url(request)
+    else:
+        frontend_url = settings.get_effective_frontend_url(request)
+
     if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
         logger.error(
             "Google OAuth login attempted but GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing."
@@ -120,12 +135,22 @@ async def google_login(request: Request):
         return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
     redirect_uri = _get_google_redirect_uri(request)
-    logger.info("Initiating Google OAuth login with redirect_uri: %s", redirect_uri)
+    logger.info("Initiating Google OAuth login with redirect_uri: %s (target frontend: %s)", redirect_uri, frontend_url)
+
+    raw_state = secrets.token_urlsafe(18)
+    state_payload = base64.urlsafe_b64encode(
+        f"{raw_state}|{frontend_url}".encode("utf-8")
+    ).decode("utf-8")
+
+    if hasattr(request, "session"):
+        request.session["_state_google"] = raw_state
+        request.session["_oauth_frontend_url"] = frontend_url
 
     try:
         return await oauth.google.authorize_redirect(
             request,
             redirect_uri,
+            state=state_payload,
         )
     except Exception as exc:
         logger.warning(
@@ -134,16 +159,12 @@ async def google_login(request: Request):
         )
         try:
             import urllib.parse
-            state = secrets.token_urlsafe(24)
-            if hasattr(request, "session"):
-                request.session["_state_google"] = state
-
             params = {
                 "client_id": settings.GOOGLE_CLIENT_ID,
                 "redirect_uri": redirect_uri,
                 "response_type": "code",
                 "scope": "openid email profile",
-                "state": state,
+                "state": state_payload,
                 "prompt": "select_account",
                 "access_type": "offline",
             }
@@ -181,9 +202,31 @@ async def google_callback(
     5. Issues DISHA JWT access token & sets HTTP-Only refresh cookie.
     6. Redirects browser back to frontend with the access token.
     """
-    frontend_url = settings.get_effective_frontend_url(request)
+    # 1. Resolve target frontend URL from OAuth state, session, or settings
+    frontend_url = None
+    state_param = request.query_params.get("state")
+    if state_param:
+        try:
+            decoded = base64.urlsafe_b64decode(state_param.encode("utf-8")).decode("utf-8")
+            if "|" in decoded:
+                _, candidate_url = decoded.split("|", 1)
+                candidate_url = candidate_url.strip().rstrip("/")
+                if any(
+                    candidate_url.startswith(allowed) or candidate_url == allowed
+                    for allowed in settings.cors_origins_list
+                    if allowed != "*"
+                ) or candidate_url.endswith(".vercel.app") or "localhost" in candidate_url or "127.0.0.1" in candidate_url:
+                    frontend_url = candidate_url
+        except Exception:
+            pass
 
-    # 1. Handle error response directly from Google
+    if not frontend_url and hasattr(request, "session"):
+        frontend_url = request.session.get("_oauth_frontend_url")
+
+    if not frontend_url:
+        frontend_url = settings.get_effective_frontend_url(request)
+
+    # 2. Handle error response directly from Google
     oauth_error = request.query_params.get("error")
     if oauth_error:
         error_desc = request.query_params.get("error_description") or oauth_error
