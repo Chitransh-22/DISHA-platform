@@ -13,7 +13,7 @@ Zero mock / dummy data.
 
 import math
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 
 from app.database.mongodb import db
@@ -277,6 +277,43 @@ def extract_news_coordinates(ev: dict) -> Tuple[float, float, str]:
     return 20.5937, 78.9629, "india_default"
 
 
+def parse_time_range_cutoff(range_str: Optional[str]) -> Tuple[Optional[Tuple[int, str, str]], str]:
+    """
+    Parses time range filter string ('24h', '7d', '15d', '30d', 'all')
+    and computes the UTC timestamp cutoff (epoch integer, ISO string, and YYYY-MM-DD date).
+    Default: '24h' (1 day).
+    """
+    if not range_str:
+        range_str = "24h"
+    r = range_str.strip().lower()
+
+    if r in ["all", "none", "0"]:
+        return None, "all"
+
+    days = 1
+    canonical = "24h"
+    if r in ["24h", "24_hours", "24_hour", "24", "1d", "1"]:
+        days = 1
+        canonical = "24h"
+    elif r in ["7d", "7_days", "7_day", "7"]:
+        days = 7
+        canonical = "7d"
+    elif r in ["15d", "15_days", "15_day", "15"]:
+        days = 15
+        canonical = "15d"
+    elif r in ["30d", "30_days", "30_day", "30", "1m", "1_month"]:
+        days = 30
+        canonical = "30d"
+
+    now = datetime.now(timezone.utc)
+    cutoff_dt = now - timedelta(days=days)
+    cutoff_epoch = int(cutoff_dt.timestamp())
+    cutoff_iso = cutoff_dt.isoformat()
+    cutoff_date = cutoff_dt.strftime("%Y-%m-%d")
+
+    return (cutoff_epoch, cutoff_iso, cutoff_date), canonical
+
+
 def get_unified_events(
     category: Optional[str] = None,
     severity: Optional[str] = None,
@@ -285,25 +322,58 @@ def get_unified_events(
     state: Optional[str] = None,
     limit: Optional[int] = None,
     skip: int = 0,
+    time_range: str = "24h",
 ) -> Dict[str, Any]:
     """
-    Retrieves and combines 100% of all real verified disaster events from MongoDB:
-    1. earthquakes (NCS RISEQ) -> 279 documents
-    2. sachet_alerts (NDMA SACHET CAP) -> 305 documents
-    3. disaster_events (Verified News Feed) -> 58 documents
+    Retrieves and combines verified disaster events from MongoDB:
+    1. earthquakes (NCS RISEQ)
+    2. sachet_alerts (NDMA SACHET CAP)
+    3. disaster_events (Verified News Feed)
 
-    Every document has valid coordinates and is normalized into a unified schema.
-    Total dataset = 642 documents.
+    Filters data directly in MongoDB at database query level using indexed timestamp fields
+    and lean projections to maximize performance and minimize payload size.
     """
+    cutoff_info, canonical_range = parse_time_range_cutoff(time_range)
+
     all_events: List[Dict[str, Any]] = []
     eq_count = 0
     sachet_count = 0
     news_count = 0
 
-    # 1. Earthquakes (NCS RISEQ) -> 279 records
+    # 1. Earthquakes (NCS RISEQ)
     if source in [None, "all", "earthquakes", "ncs"]:
         try:
-            eq_cursor = list(db["earthquakes"].find({}))
+            eq_query: Dict[str, Any] = {}
+            if cutoff_info:
+                c_epoch, c_iso, _ = cutoff_info
+                eq_query = {
+                    "$or": [
+                        {"origin_timestamp": {"$gte": c_epoch}},
+                        {"created_at": {"$gte": c_iso}},
+                        {"origin_time": {"$gte": c_iso}},
+                    ]
+                }
+
+            eq_projection = {
+                "_id": 1,
+                "event_id": 1,
+                "latitude": 1,
+                "longitude": 1,
+                "magnitude": 1,
+                "location": 1,
+                "region": 1,
+                "depth_km": 1,
+                "origin_time": 1,
+                "origin_timestamp": 1,
+                "status": 1,
+                "relevance": 1,
+                "relevance_details": 1,
+                "source_url": 1,
+                "felt_report_url": 1,
+                "created_at": 1,
+            }
+
+            eq_cursor = list(db["earthquakes"].find(eq_query, eq_projection).sort("origin_timestamp", -1))
             for eq in eq_cursor:
                 lat = eq.get("latitude")
                 lon = eq.get("longitude")
@@ -366,11 +436,56 @@ def get_unified_events(
         except Exception as e:
             logger.error(f"Error reading earthquakes collection: {e}")
 
-    # 2. NDMA SACHET Government Alerts -> 305 records
+    # 2. NDMA SACHET Government Alerts
     if source in [None, "all", "sachet", "ndma"]:
         try:
-            sachet_cursor = list(db["sachet_alerts"].find({}))
-            for sa in sachet_cursor:
+            sa_query: Dict[str, Any] = {}
+            if cutoff_info:
+                c_epoch, c_iso, _ = cutoff_info
+                sa_query = {
+                    "$or": [
+                        {"event_timestamp": {"$gte": c_epoch}},
+                        {"sent_at": {"$gte": c_iso}},
+                        {"effective_at": {"$gte": c_iso}},
+                        {"created_at": {"$gte": c_iso}},
+                        {"published_at": {"$gte": c_iso}},
+                    ]
+                }
+
+            sa_projection = {
+                "_id": 1,
+                "event_id": 1,
+                "alert_id": 1,
+                "latitude": 1,
+                "longitude": 1,
+                "location": 1,
+                "disaster_type": 1,
+                "event": 1,
+                "severity": 1,
+                "status": 1,
+                "headline": 1,
+                "title": 1,
+                "description": 1,
+                "instruction": 1,
+                "area_description": 1,
+                "sender_name": 1,
+                "source_authority": 1,
+                "link": 1,
+                "source_url": 1,
+                "polygon": 1,
+                "circle": 1,
+                "sent_at": 1,
+                "published_at": 1,
+                "effective_at": 1,
+                "event_time": 1,
+                "event_timestamp": 1,
+                "created_at": 1,
+                "urgency": 1,
+                "certainty": 1,
+            }
+
+            sa_cursor = list(db["sachet_alerts"].find(sa_query, sa_projection).sort("event_timestamp", -1))
+            for sa in sa_cursor:
                 lat, lon, coord_precision = extract_sachet_coordinates(sa)
                 loc = sa.get("location") or {}
 
@@ -424,10 +539,43 @@ def get_unified_events(
         except Exception as e:
             logger.error(f"Error reading sachet_alerts collection: {e}")
 
-    # 3. Verified News Disasters (GNews Feed) -> 58 records
+    # 3. Verified News Disasters (GNews Feed)
     if source in [None, "all", "news", "gnews"]:
         try:
-            news_cursor = list(db["disaster_events"].find({}))
+            news_query: Dict[str, Any] = {}
+            if cutoff_info:
+                _, c_iso, c_date = cutoff_info
+                news_query = {
+                    "$or": [
+                        {"processed_at": {"$gte": c_iso}},
+                        {"first_seen_at": {"$gte": c_iso}},
+                        {"published_at": {"$gte": c_iso}},
+                        {"incident_date": {"$gte": c_date}},
+                    ]
+                }
+
+            news_projection = {
+                "_id": 1,
+                "event_id": 1,
+                "article_id": 1,
+                "latitude": 1,
+                "longitude": 1,
+                "location": 1,
+                "disaster_type": 1,
+                "severity": 1,
+                "status": 1,
+                "title": 1,
+                "description": 1,
+                "url": 1,
+                "image": 1,
+                "confidence": 1,
+                "incident_date": 1,
+                "processed_at": 1,
+                "published_at": 1,
+                "first_seen_at": 1,
+            }
+
+            news_cursor = list(db["disaster_events"].find(news_query, news_projection).sort("processed_at", -1))
             for ev in news_cursor:
                 lat, lon, coord_precision = extract_news_coordinates(ev)
                 loc = ev.get("location") or {}
@@ -544,6 +692,7 @@ def get_unified_events(
 
     return {
         "status": "success",
+        "time_range": canonical_range,
         "total": total_count,
         "count": len(paged_events),
         "source_counts": {
@@ -558,9 +707,11 @@ def get_unified_events(
 
 
 def get_event_by_id(event_id: str) -> Optional[Dict[str, Any]]:
-    """Retrieves a single unified event by its unique ID."""
-    all_res = get_unified_events(limit=None)
+    """Retrieves a single unified event by its unique deterministic ID or db_id."""
+    # Look across full dataset
+    all_res = get_unified_events(limit=None, time_range="all")
+    clean_id = str(event_id).strip()
     for ev in all_res.get("events", []):
-        if ev["id"] == event_id or ev.get("db_id") == event_id:
+        if str(ev.get("id")) == clean_id or str(ev.get("db_id")) == clean_id:
             return ev
     return None

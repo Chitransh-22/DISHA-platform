@@ -4,6 +4,8 @@ import {
   Camera, Upload, X, CheckCircle, Loader2, LogIn, Shield,
   FileText, Zap, Clock
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { submitIncidentReport } from '../services/api';
 
 
 
@@ -84,7 +86,9 @@ const LoginPrompt = ({ onNavigate }) => (
 );
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export const ReportIncidentPage = ({ onNavigate, isLoggedIn = false }) => {
+export const ReportIncidentPage = ({ onNavigate, isLoggedIn: propIsLoggedIn }) => {
+  const { isLoggedIn: contextIsLoggedIn, user: contextUser } = useAuth();
+  const isLoggedIn = propIsLoggedIn !== undefined ? propIsLoggedIn : contextIsLoggedIn;
 
   // ── form state ──
   const [location, setLocation] = useState({ lat: null, lng: null, address: '', loading: false, error: '' });
@@ -169,11 +173,34 @@ export const ReportIncidentPage = ({ onNavigate, isLoggedIn = false }) => {
     e.preventDefault();
     if (!validate()) return;
     setSubmitting(true);
-    await new Promise(r => setTimeout(r, 2000)); // simulate API call
-    const id = 'INC-' + Date.now().toString().slice(-6);
-    setReportId(id);
-    setSubmitting(false);
-    setSubmitted(true);
+    setErrors(prev => ({ ...prev, submit: '' }));
+
+    try {
+      const payload = {
+        event_type: eventType,
+        description: description.trim(),
+        location: {
+          lat: location.lat,
+          lng: location.lng,
+          latitude: location.lat,
+          longitude: location.lng,
+          address: location.address,
+        },
+        images: images.map(img => ({ name: img.name, url: img.url })),
+      };
+
+      const res = await submitIncidentReport(payload);
+      const generatedId = res.report_id || res.report?.report_id || ('INC-' + Date.now().toString().slice(-6));
+      setReportId(generatedId);
+      setSubmitted(true);
+    } catch (err) {
+      setErrors(prev => ({
+        ...prev,
+        submit: err.message || 'Failed to submit incident report. Please check your connection and try again.',
+      }));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // ── Success Screen ──
@@ -186,19 +213,11 @@ export const ReportIncidentPage = ({ onNavigate, isLoggedIn = false }) => {
               <CheckCircle className="w-10 h-10 text-emerald-500" />
             </div>
             <h2 className="text-2xl font-bold text-slate-900 mb-1">Report Submitted!</h2>
-            <p className="text-slate-500 text-sm mb-4">Your incident has been logged and dispatched to the nearest response team.</p>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-6 py-3 inline-block mb-6">
+            <p className="text-slate-500 text-sm mb-6">Your incident report has been recorded successfully.</p>
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 inline-block mb-8">
               <span className="text-xs text-slate-400 font-medium">Report ID</span>
               <div className="text-lg font-bold text-[#ea580c] tracking-widest">{reportId}</div>
             </div>
-            <ul className="text-left text-sm space-y-3 mb-8">
-              {['Report received by DISHA', 'Nearest team notified', 'Estimated response in 15–30 min'].map((step, i) => (
-                <li key={i} className="flex items-center gap-3">
-                  <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
-                  <span className="text-slate-700">{step}</span>
-                </li>
-              ))}
-            </ul>
             <button
               id="report-another-btn"
               onClick={() => { setSubmitted(false); setEventType(''); setDescription(''); setImages([]); setErrors({}); }}
@@ -390,6 +409,14 @@ export const ReportIncidentPage = ({ onNavigate, isLoggedIn = false }) => {
                 </div>
               )}
             </div>
+
+            {/* ── Submit Error ── */}
+            {errors.submit && (
+              <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+                <span>{errors.submit}</span>
+              </div>
+            )}
 
             {/* ── Submit Button ── */}
             <button

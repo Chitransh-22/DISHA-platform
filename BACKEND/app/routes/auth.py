@@ -16,7 +16,9 @@ Implements RESTful endpoints for:
 """
 
 import logging
+import secrets
 from typing import Any, Dict, Optional
+from urllib.parse import quote_plus
 
 from fastapi import (
     APIRouter,
@@ -75,104 +77,271 @@ oauth.register(
     name="google",
     client_id=settings.GOOGLE_CLIENT_ID,
     client_secret=settings.GOOGLE_CLIENT_SECRET,
+    authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
+    access_token_url="https://oauth2.googleapis.com/token",
+    userinfo_endpoint="https://openidconnect.googleapis.com/v1/userinfo",
+    jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
     server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
     client_kwargs={
         "scope": "openid email profile",
+        "prompt": "select_account",
     },
 )
+
+
+def _get_google_redirect_uri(request: Request) -> str:
+    """
+    Computes the redirect URI for Google OAuth.
+    Prioritizes explicit GOOGLE_REDIRECT_URI environment variable if configured.
+    Falls back to generating dynamic URL from the request, respecting reverse proxy HTTPS headers.
+    """
+    if settings.GOOGLE_REDIRECT_URI and settings.GOOGLE_REDIRECT_URI.strip():
+        return settings.GOOGLE_REDIRECT_URI.strip()
+
+    callback_url = str(request.url_for("google_callback"))
+    if not callback_url.endswith("/"):
+        callback_url += "/"
+
+    # If backend is deployed behind HTTPS proxy (e.g. Render, AWS, Nginx),
+    # ensure redirect URI uses https scheme so Google Cloud Console accepts it.
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").lower()
+    if forwarded_proto == "https" or settings.is_production or settings.COOKIE_SECURE:
+        if callback_url.startswith("http://"):
+            callback_url = "https://" + callback_url[len("http://") :]
+
+    return callback_url
 
 
 # ============================================================
 # GOOGLE LOGIN
 # ============================================================
+
 @router.get(
     "/google/login",
     summary="Start Google OAuth login",
     name="google_login",
 )
 async def google_login(request: Request):
-    redirect_uri = request.url_for("google_callback")
+    """
+    Initiates Google OAuth2 / OpenID Connect login flow.
+    Redirects the user's browser to Google's consent screen.
+    """
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        logger.error(
+            "Google OAuth login attempted but GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing."
+        )
+        redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Google OAuth is not configured on the server.')}"
+        return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
-    print("GOOGLE REDIRECT URI:", redirect_uri)
+    redirect_uri = _get_google_redirect_uri(request)
+    logger.info("Initiating Google OAuth login with redirect_uri: %s", redirect_uri)
 
-    return await oauth.google.authorize_redirect(
-        request,
-        redirect_uri,
-    )
+    try:
+        return await oauth.google.authorize_redirect(
+            request,
+            redirect_uri,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Authlib authorize_redirect failed (%s); generating direct Google authorization URL fallback",
+            exc,
+        )
+        try:
+            import urllib.parse
+            state = secrets.token_urlsafe(24)
+            if hasattr(request, "session"):
+                request.session["_state_google"] = state
+
+            params = {
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "scope": "openid email profile",
+                "state": state,
+                "prompt": "select_account",
+                "access_type": "offline",
+            }
+            google_auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+            return RedirectResponse(url=google_auth_url, status_code=status.HTTP_302_FOUND)
+        except Exception as fallback_exc:
+            logger.exception("Both Authlib and direct Google authorization fallback failed: %s", fallback_exc)
+            redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Unable to connect to Google OAuth service. Please try again or use email sign in.')}"
+            return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
+
+
+# ============================================================
+# GOOGLE CALLBACK
+# ============================================================
 
 @router.get(
-    "/google/callback/",
+    "/google/callback",
     name="google_callback",
     summary="Handle Google OAuth callback",
+)
+@router.get(
+    "/google/callback/",
+    include_in_schema=False,
 )
 async def google_callback(
     request: Request,
     response: Response,
 ):
     """
-    Handles Google's OAuth callback.
-
-    Finds or creates the DISHA user and then creates
-    the normal DISHA JWT/session authentication state.
+    Handles Google's OAuth callback:
+    1. Validates callback query parameters (error / code).
+    2. Exchanges authorization code for Google access token.
+    3. Retrieves user information (email, name, sub/google_id).
+    4. Finds or creates the corresponding DISHA user account.
+    5. Issues DISHA JWT access token & sets HTTP-Only refresh cookie.
+    6. Redirects browser back to frontend with the access token.
     """
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
+
+    # 1. Handle error response directly from Google
+    oauth_error = request.query_params.get("error")
+    if oauth_error:
+        error_desc = request.query_params.get("error_description") or oauth_error
+        logger.warning(
+            "Google OAuth callback received error from Google: %s (description: %s)",
+            oauth_error,
+            error_desc,
+        )
+        safe_error = (
+            "Google login was cancelled or denied."
+            if oauth_error == "access_denied"
+            else "Google authentication failed."
+        )
+        redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus(safe_error)}"
+        return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
+
+    # 2. Check for authorization code
+    code = request.query_params.get("code")
+    if not code:
+        logger.warning("Google OAuth callback called without authorization code.")
+        redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Missing authorization code from Google.')}"
+        return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
     try:
-        token = await oauth.google.authorize_access_token(request)
+        # 3. Exchange authorization code with Google
+        token = None
+        try:
+            token = await oauth.google.authorize_access_token(request)
+        except Exception as exc:
+            logger.warning(
+                "Authlib authorize_access_token exception: %s. Attempting direct Google token endpoint exchange fallback.",
+                exc,
+            )
+            # Direct token exchange fallback using httpx
+            import httpx
+            redirect_uri = _get_google_redirect_uri(request)
+            token_url = "https://oauth2.googleapis.com/token"
+            data = {
+                "code": code,
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            }
+            async with httpx.AsyncClient() as client:
+                token_res = await client.post(token_url, data=data, timeout=15.0)
+                if token_res.is_success:
+                    token = token_res.json()
+                    logger.info("Direct Google token endpoint fallback succeeded.")
+                else:
+                    logger.error(
+                        "Direct Google token exchange fallback failed (%s): %s",
+                        token_res.status_code,
+                        token_res.text,
+                    )
+                    redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Google authentication token exchange failed.')}"
+                    return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
+        if not token or not isinstance(token, dict):
+            logger.error(
+                "Google OAuth token exchange returned unexpected payload type: %s",
+                type(token),
+            )
+            redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Invalid response from Google token endpoint.')}"
+            return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
+
+        # 4. Retrieve Google user profile info
         user_info = token.get("userinfo")
+        if not user_info:
+            try:
+                user_info = await oauth.google.userinfo(token=token)
+            except Exception as u_exc:
+                logger.warning(
+                    "Google OAuth userinfo endpoint request failed: %s; attempting id_token parse fallback",
+                    u_exc,
+                )
+
+        # Fallback to parsing id_token payload if userinfo is still not available
+        if not user_info and token.get("id_token"):
+            try:
+                import jwt as pyjwt
+                user_info = pyjwt.decode(
+                    token["id_token"],
+                    options={"verify_signature": False},
+                )
+            except Exception as jwt_exc:
+                logger.error("Failed to parse Google id_token fallback: %s", jwt_exc)
+
+        # Extra fallback: fetch from Google's userinfo endpoint directly with access_token
+        if not user_info and token.get("access_token"):
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    ui_res = await client.get(
+                        "https://www.googleapis.com/oauth2/v3/userinfo",
+                        headers={"Authorization": f"Bearer {token['access_token']}"},
+                        timeout=10.0,
+                    )
+                    if ui_res.is_success:
+                        user_info = ui_res.json()
+            except Exception as ui_e:
+                logger.warning("Direct Google userinfo fetch failed: %s", ui_e)
 
         if not user_info:
-            user_info = await oauth.google.parse_id_token(
-                request,
-                token,
+            logger.error(
+                "Unable to retrieve Google user information from token or userinfo endpoint."
             )
+            redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Unable to retrieve Google user profile.')}"
+            return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
-        if not user_info:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unable to retrieve Google user information.",
-            )
-
-        google_email = user_info.get("email")
-        google_name = user_info.get("name")
-        google_sub = user_info.get("sub")
+        google_email = (user_info.get("email") or "").strip().lower()
+        google_name = (
+            user_info.get("name")
+            or f"{user_info.get('given_name', '')} {user_info.get('family_name', '')}".strip()
+            or None
+        )
+        google_sub = str(user_info.get("sub") or "").strip()
 
         if not google_email or not google_sub:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Google account did not provide required information.",
+            logger.error(
+                "Google account info missing mandatory fields (email_present=%s, sub_present=%s)",
+                bool(google_email),
+                bool(google_sub),
             )
+            redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Google account did not provide required email or ID.')}"
+            return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
-        google_email = google_email.strip().lower()
-
-        # ----------------------------------------------------
-        # Find existing user
-        # ----------------------------------------------------
-
-        user = await _auth_service.user_repo.get_by_email(
-            google_email
-        )
-
-        # ----------------------------------------------------
-        # Create user if it doesn't exist
-        # ----------------------------------------------------
+        # 5. Find or create DISHA user
+        user = await _auth_service.user_repo.get_by_email(google_email)
 
         if not user:
-            username_base = (
-                google_email.split("@")[0]
-                .lower()
-            )
+            username_base = "".join(
+                c for c in google_email.split("@")[0].lower() if c.isalnum() or c in "_-."
+            )[:24]
+            if not username_base:
+                username_base = "disha_user"
 
-            username = username_base[:30]
-
-            existing_username = (
-                await _auth_service.user_repo.get_by_username(
-                    username
-                )
-            )
-
+            username = username_base
+            existing_username = await _auth_service.user_repo.get_by_username(username)
             if existing_username:
-                username = f"{username}_{google_sub[-6:]}"
+                username = f"{username_base[:20]}_{google_sub[-6:]}"
+                if await _auth_service.user_repo.get_by_username(username):
+                    username = f"{username_base[:16]}_{secrets.token_hex(4)}"
 
             user_data = {
                 "username": username,
@@ -187,89 +356,60 @@ async def google_callback(
                 "pincode": None,
             }
 
-            user = await _auth_service.user_repo.create_user(
-                user_data
-            )
-
+            user = await _auth_service.user_repo.create_user(user_data)
+            logger.info("Created new DISHA user account via Google OAuth for: %s", google_email)
         else:
-            # ------------------------------------------------
-            # Existing account
-            # ------------------------------------------------
-
             updates = {
                 "verified": True,
-                "auth_provider": user.get(
-                    "auth_provider",
-                    "google",
-                ),
+                "auth_provider": user.get("auth_provider") or "google",
                 "google_id": google_sub,
             }
+            if not user.get("name") and google_name:
+                updates["name"] = google_name
 
-            user = await _auth_service.user_repo.update_user(
-                user["id"],
-                updates,
-            )
+            user_id = str(user.get("id") or user.get("_id"))
+            user = await _auth_service.user_repo.update_user(user_id, updates)
+            logger.info("Updated existing DISHA user account via Google OAuth for: %s", google_email)
 
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unable to create or retrieve DISHA user.",
+            logger.error(
+                "Failed to retrieve or create user in database for: %s",
+                google_email,
             )
+            redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Database error creating or updating user account.')}"
+            return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
-        # ----------------------------------------------------
-        # Create normal DISHA session + JWTs
-        # ----------------------------------------------------
-
+        # 6. Create normal DISHA session + JWTs
         ip = get_client_ip(request)
         user_agent = get_user_agent(request)
 
-        access_token, refresh_token, user_dict = (
-            await _auth_service.login_with_oauth(
-                user=user,
-                ip=ip,
-                user_agent=user_agent,
-            )
+        access_token, refresh_token, user_dict = await _auth_service.login_with_oauth(
+            user=user,
+            ip=ip,
+            user_agent=user_agent,
         )
 
-        # ----------------------------------------------------
-        # Set normal DISHA refresh cookie
-        # ----------------------------------------------------
-
-        set_refresh_cookie(
-            response,
-            refresh_token,
-        )
-
-        # ----------------------------------------------------
-        # Redirect to frontend
-        # ----------------------------------------------------
-
-        frontend_url = settings.FRONTEND_URL.rstrip("/")
-
-        redirect_url = (
-            f"{frontend_url}"
-            f"/auth/google/success"
-            f"?access_token={access_token}"
-        )
-
-        return RedirectResponse(
+        # 7. Construct frontend success redirect and attach refresh cookie to redirect response
+        redirect_url = f"{frontend_url}/auth/google/success?access_token={access_token}&refresh_token={refresh_token}"
+        redirect_response = RedirectResponse(
             url=redirect_url,
             status_code=status.HTTP_302_FOUND,
         )
+
+        set_refresh_cookie(
+            redirect_response,
+            refresh_token,
+        )
+
+        return redirect_response
 
     except HTTPException:
         raise
 
     except Exception as exc:
-        logger.exception(
-            "Google OAuth authentication failed: %s",
-            exc,
-        )
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Google authentication failed.",
-        )
+        logger.exception("Unexpected error during Google OAuth callback: %s", exc)
+        redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Google authentication failed.')}"
+        return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
 # ============================================================
 # REGISTER

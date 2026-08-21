@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
-from app.core.database import close_db_connections, get_async_db, init_auth_indexes
+from app.core.database import close_db_connections, get_async_db, init_auth_indexes, init_incident_indexes
 from app.database.mongodb import init_db_indexes
 import app.database.mongodb as sync_mongodb
 
@@ -34,6 +34,7 @@ from app.routes.gnews import router as news_router
 from app.routes.earthquakes import router as earthquakes_router
 from app.routes.sachet import router as sachet_router
 from app.routes.analysis import router as analysis_router
+from app.routes.incidents import router as incidents_router, reports_alias_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
         # Initialize async database indexes
         async_db = get_async_db()
         await init_auth_indexes(async_db)
+        await init_incident_indexes(async_db)
         # Initialize sync collections indexes for legacy pipelines
         sync_db = sync_mongodb.db
         init_db_indexes(sync_db)
@@ -97,6 +99,8 @@ app.add_middleware(
 
 # Register All API Routers
 app.include_router(auth_router)
+app.include_router(incidents_router)
+app.include_router(reports_alias_router)
 app.include_router(events_router)
 app.include_router(emergency_services_router)
 app.include_router(news_router)
@@ -119,6 +123,10 @@ async def root():
 
 @app.get("/health", tags=["Health"], summary="Health Check")
 @app.get("/api/health", tags=["Health"], summary="API Health Check")
+@app.head("/api/health", tags=["Health"], summary="API Health Check")
+@app.head("/health", tags=["Health"], summary="API Health Check")
+
+
 async def health():
     return {
         "status": "ok",

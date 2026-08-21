@@ -151,6 +151,7 @@ def _send_smtp_email_sync(
     recipient: str,
     subject: str,
     html_content: str,
+    otp: Optional[str] = None,
 ) -> bool:
     """Synchronous SMTP email delivery."""
     sender = settings.SMTP_FROM or settings.SMTP_USER or settings.GOOGLE_USER or "no-reply@disha.gov.in"
@@ -210,11 +211,16 @@ def _send_smtp_email_sync(
         except Exception as e:
             logger.error(f"[EmailService] SMTP delivery failed: {e}")
 
-    # 3. Development / Mock Mode fallback (logged cleanly)
-    logger.info(
-        f"[EmailService][DEV/MOCK] Verification Email for {recipient} generated successfully. "
-        f"Subject: '{subject}'"
-    )
+    # 3. Development / Mock Mode fallback (logged cleanly for testing)
+    if settings.ENVIRONMENT == "development" or settings.DEBUG:
+        logger.info(
+            f"[EmailService][DEV MODE] Verification OTP code for {recipient}: {otp} (Subject: '{subject}')"
+        )
+    else:
+        logger.info(
+            f"[EmailService][DEV/MOCK] Verification Email for {recipient} generated successfully. "
+            f"Subject: '{subject}'"
+        )
     return True
 
 
@@ -236,4 +242,5 @@ async def send_verification_email(
         email,
         subject,
         html,
+        otp,
     )
