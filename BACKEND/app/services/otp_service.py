@@ -2,14 +2,13 @@
 DISHA Platform - OTP Business Logic & Verification Service
 Disaster Intelligence and Situational Hazard Awareness Platform
 
-Coordinates OTP generation, HMAC hashing, email dispatch, attempt rate-limiting,
-and constant-time verification.
+Coordinates OTP generation, HMAC hashing, pending registration storage,
+email dispatch, attempt rate-limiting, and constant-time verification.
 """
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
-from fastapi import HTTPException, status
+from typing import Any, Dict, Optional, Tuple
 
 from app.core.config import settings
 from app.core.security import generate_secure_otp, hash_otp, verify_otp_hash
@@ -26,27 +25,29 @@ class OTPService:
     async def create_and_send_otp(
         self,
         email: str,
-        user_id: str,
+        user_id: Optional[str] = None,
         username: Optional[str] = None,
+        registration_data: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
-        Generates a 6-digit secure OTP, hashes it, stores it in MongoDB with 10-minute expiry,
-        and sends the verification email.
+        Generates a 6-digit secure OTP, hashes it, stores it in MongoDB with 10-minute expiry
+        along with optional pending registration data, and sends the verification email.
         """
         clean_email = email.strip().lower()
         plain_otp = generate_secure_otp(length=settings.OTP_LENGTH)
         hashed_otp = hash_otp(plain_otp, clean_email)
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
 
-        # Store in MongoDB (automatically invalidates any older OTP for this email)
+        # Store in MongoDB (invalidates any older OTP for this email)
         await self.otp_repo.create_otp(
             email=clean_email,
-            user_id=str(user_id),
+            user_id=str(user_id) if user_id else None,
             otp_hash=hashed_otp,
             expires_at=expires_at,
+            registration_data=registration_data,
         )
 
-        # Dispatch verification email
+        # Dispatch verification email via Brevo HTTPS API
         email_sent = await send_verification_email(
             email=clean_email,
             otp=plain_otp,
@@ -54,11 +55,41 @@ class OTPService:
         )
         return email_sent
 
+    async def resend_existing_otp(
+        self,
+        email: str,
+        username: Optional[str] = None,
+    ) -> bool:
+        """
+        Generates a fresh OTP for an existing pending registration or unverified user,
+        replaces the stored hash and expiration, and sends the new email via Brevo.
+        """
+        clean_email = email.strip().lower()
+        plain_otp = generate_secure_otp(length=settings.OTP_LENGTH)
+        hashed_otp = hash_otp(plain_otp, clean_email)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
+
+        updated_doc = await self.otp_repo.update_otp_code(
+            email=clean_email,
+            otp_hash=hashed_otp,
+            expires_at=expires_at,
+        )
+        if not updated_doc:
+            return False
+
+        # Dispatch fresh verification email
+        email_sent = await send_verification_email(
+            email=clean_email,
+            otp=plain_otp,
+            username=username or updated_doc.get("registration_data", {}).get("username"),
+        )
+        return email_sent
+
     async def verify_otp(
         self,
         email: str,
         plain_otp: str,
-    ) -> Tuple[bool, Optional[str], Optional[str]]:
+    ) -> Tuple[bool, Optional[str], Optional[str], Optional[Dict[str, Any]]]:
         """
         Verifies the user-supplied OTP:
         - Checks active OTP exists
@@ -67,19 +98,19 @@ class OTPService:
         - Constant-time hash verification
         - Cleans up OTP on success
 
-        Returns: (is_valid: bool, error_message: Optional[str], user_id: Optional[str])
+        Returns: (is_valid: bool, error_message: Optional[str], user_id: Optional[str], registration_data: Optional[Dict[str, Any]])
         """
         clean_email = email.strip().lower()
         otp_doc = await self.otp_repo.get_active_otp(clean_email)
 
         if not otp_doc:
-            return False, "Verification code has expired or was not requested. Please request a new code.", None
+            return False, "Verification code has expired or was not requested. Please request a new code.", None, None
 
         # Check maximum verification attempts to prevent brute-forcing
         attempts = otp_doc.get("attempts", 0)
         if attempts >= settings.OTP_MAX_ATTEMPTS:
             await self.otp_repo.delete_otp(otp_doc["id"])
-            return False, "Too many failed attempts. This verification code is now invalidated. Please request a new one.", None
+            return False, "Too many failed attempts. This verification code is now invalidated. Please request a new one.", None, None
 
         # Increment attempt counter
         await self.otp_repo.increment_attempts(otp_doc["id"])
@@ -87,12 +118,11 @@ class OTPService:
         # Check expiration
         expires_at = otp_doc["expires_at"]
         if isinstance(expires_at, datetime):
-            # Ensure timezone awareness
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
             if datetime.now(timezone.utc) > expires_at:
                 await self.otp_repo.delete_otp(otp_doc["id"])
-                return False, "Verification code has expired. Please request a new code.", None
+                return False, "Verification code has expired. Please request a new code.", None, None
 
         # Constant-time comparison
         is_match = verify_otp_hash(
@@ -105,9 +135,9 @@ class OTPService:
             remaining = settings.OTP_MAX_ATTEMPTS - (attempts + 1)
             if remaining <= 0:
                 await self.otp_repo.delete_otp(otp_doc["id"])
-                return False, "Incorrect verification code. Maximum attempts exceeded. Please request a new code.", None
-            return False, f"Incorrect verification code. {remaining} attempt(s) remaining.", None
+                return False, "Incorrect verification code. Maximum attempts exceeded. Please request a new code.", None, None
+            return False, f"Incorrect verification code. {remaining} attempt(s) remaining.", None, None
 
-        # Success: Delete OTP document and return user_id
+        # Success: Delete OTP document and return user_id and registration_data
         await self.otp_repo.delete_otp(otp_doc["id"])
-        return True, None, otp_doc.get("user_id")
+        return True, None, otp_doc.get("user_id"), otp_doc.get("registration_data")

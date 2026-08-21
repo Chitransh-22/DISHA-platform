@@ -1,9 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
-  authLogin,
-  authRegister,
-  authVerifyEmail,
-  authResendOtp,
   authRefreshToken,
   authGetMe,
   authLogout,
@@ -171,30 +167,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   /**
-   * Log in with email and password.
-   */
-  const login = useCallback(async ({ email, password }) => {
-    setAuthError(null);
-    const data = await authLogin({ email, password });
-    if (data?.user) {
-      setUser(data.user);
-      setStoredUser(data.user);
-      setNotification({
-        type: 'success',
-        message: 'Sign in successful',
-      });
-    } else {
-      await refreshUser();
-      setNotification({
-        type: 'success',
-        message: 'Sign in successful',
-      });
-    }
-    return data;
-  }, [refreshUser]);
-
-  /**
-   * Ingest token directly (e.g. from Google OAuth).
+   * Ingest token directly (from Google OAuth).
    */
   const loginWithToken = useCallback(async (token, refreshToken = null) => {
     setAccessToken(token, refreshToken);
@@ -207,41 +180,6 @@ export const AuthProvider = ({ children }) => {
     }
     return u;
   }, [refreshUser]);
-
-  /**
-   * Register a new account.
-   */
-  const register = useCallback(async (userData) => {
-    setAuthError(null);
-    return await authRegister(userData);
-  }, []);
-
-  /**
-   * Verify email OTP.
-   */
-  const verifyEmail = useCallback(async ({ email, otp }) => {
-    setAuthError(null);
-    const res = await authVerifyEmail({ email, otp });
-    if (res?.access_token) {
-      setAccessToken(res.access_token, res.refresh_token || null);
-    }
-    if (res?.user) {
-      setUser(res.user);
-      setStoredUser(res.user);
-      setNotification({
-        type: 'success',
-        message: 'Sign in successful',
-      });
-    }
-    return res;
-  }, []);
-
-  /**
-   * Resend verification OTP.
-   */
-  const resendOtp = useCallback(async (email) => {
-    return await authResendOtp(email);
-  }, []);
 
   /**
    * Redirects browser to Google OAuth initiate route.
@@ -288,11 +226,7 @@ export const AuthProvider = ({ children }) => {
     notification,
     showNotification,
     clearNotification,
-    login,
     loginWithToken,
-    register,
-    verifyEmail,
-    resendOtp,
     googleLogin,
     logout,
     logoutAll,
