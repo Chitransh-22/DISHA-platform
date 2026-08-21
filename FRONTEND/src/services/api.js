@@ -129,6 +129,10 @@ export const fetchEvents = async (params = {}) => {
   const baseUrl = getApiBaseUrl();
   const query = new URLSearchParams();
 
+  // Time range filter (Default: '24h')
+  const timeRange = params.range || params.time_range || (params.days ? `${params.days}d` : '24h');
+  query.append('range', timeRange);
+
   if (params.category && params.category !== 'All') {
     query.append('category', params.category);
   }
@@ -144,6 +148,12 @@ export const fetchEvents = async (params = {}) => {
   if (params.state) {
     query.append('state', params.state);
   }
+  if (params.limit) {
+    query.append('limit', params.limit);
+  }
+  if (params.skip) {
+    query.append('skip', params.skip);
+  }
 
   const queryString = query.toString() ? `?${query.toString()}` : '';
   const url = `${baseUrl}/api/events${queryString}`;
@@ -158,15 +168,15 @@ export const fetchEvents = async (params = {}) => {
 
     if (response.ok) {
       const data = await response.json();
-      if (data && Array.isArray(data.events) && data.events.length > 0) {
+      if (data && Array.isArray(data.events)) {
         return data;
       }
     }
   } catch (err) {
-    console.warn('[DISHA API] /api/events notice, querying multi-source DB endpoints:', err.message);
+    console.warn('[DISHA API] /api/events notice:', err.message);
   }
 
-  // Multi-source fallback to assemble 100% of real database records from backend individual routes
+  // Multi-source fallback to assemble real database records if unified endpoint is unavailable
   return await fetchEventsFallback(baseUrl);
 };
 
@@ -780,5 +790,86 @@ export const submitIncidentReport = async (reportData) => {
   }
   return data;
 };
+
+/**
+ * Fetches paginated, time-filtered verified disaster news articles.
+ * @param {Object} params - { range: '24h'|'7d'|'15d'|'30d'|'all', category, severity, limit, skip }
+ */
+export const fetchRecentNews = async (params = {}) => {
+  const baseUrl = getApiBaseUrl();
+  const query = new URLSearchParams();
+  
+  const timeRange = params.range || params.time_range || (params.days ? `${params.days}d` : '24h');
+  query.append('range', timeRange);
+
+  if (params.category && params.category !== 'All') {
+    query.append('category', params.category);
+  }
+  if (params.severity && params.severity !== 'All') {
+    query.append('severity', params.severity);
+  }
+  if (params.source && params.source !== 'All' && params.source !== 'All Sources') {
+    query.append('source', params.source);
+  }
+  if (params.limit) {
+    query.append('limit', params.limit);
+  }
+  if (params.skip) {
+    query.append('skip', params.skip);
+  }
+
+  const url = `${baseUrl}/api/news/recent?${query.toString()}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch recent news (Status ${response.status})`);
+  }
+  return await response.json();
+};
+
+/**
+ * Fetches distinct list of available news sources from the database.
+ */
+export const fetchNewsSources = async () => {
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/api/news/sources`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    return { status: 'error', sources: ['All Sources', 'NDMA SACHET', 'NCS Seismology', 'Verified Disaster News'] };
+  }
+  return await response.json();
+};
+
+/**
+ * Fetches full details for a single news article by ID.
+ * @param {string} newsId - Unique article/event ID
+ */
+export const fetchNewsDetail = async (newsId) => {
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/api/news/detail/${encodeURIComponent(newsId)}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch news article details (Status ${response.status})`);
+  }
+  return await response.json();
+};
+
 
 

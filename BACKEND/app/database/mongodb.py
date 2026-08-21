@@ -58,6 +58,7 @@ def init_db_indexes(database):
 
         # earthquakes collection (NCS RISEQ ingestion)
         database["earthquakes"].create_index([("event_id", ASCENDING)], unique=True, background=True)
+        database["earthquakes"].create_index([("origin_timestamp", DESCENDING)], background=True)
         database["earthquakes"].create_index([("origin_time", DESCENDING)], background=True)
         database["earthquakes"].create_index([("magnitude", DESCENDING)], background=True)
         database["earthquakes"].create_index([("relevance", ASCENDING)], background=True)
@@ -72,6 +73,7 @@ def init_db_indexes(database):
         database["sachet_alerts"].create_index([("event_id", ASCENDING)], unique=True, background=True)
         database["sachet_alerts"].create_index([("alert_id", ASCENDING)], background=True)
         database["sachet_alerts"].create_index([("guid", ASCENDING)], background=True)
+        database["sachet_alerts"].create_index([("event_timestamp", DESCENDING)], background=True)
         database["sachet_alerts"].create_index([("event_time", DESCENDING)], background=True)
         database["sachet_alerts"].create_index([("effective_at", DESCENDING)], background=True)
         database["sachet_alerts"].create_index([("expires_at", DESCENDING)], background=True)

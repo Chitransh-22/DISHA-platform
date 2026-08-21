@@ -7,6 +7,8 @@ import { AuthPage } from './pages/AuthPage';
 import { NearbyIncidentsPage } from './pages/NearbyIncidentsPage';
 import { AnalysisPage } from './pages/AnalysisPage/AnalysisPage';
 import { GraphsAnalyticsPage } from './pages/AnalysisPage/GraphsAnalyticsPage';
+import { RecentNewsPage } from './pages/RecentNewsPage';
+import { NewsDetailPage } from './pages/NewsDetailPage';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { NotificationToast } from './components/common/NotificationToast';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -14,6 +16,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 function AppContent() {
   const [currentPage, setCurrentPage] = useState('landing');
   const [redirectAfterAuth, setRedirectAfterAuth] = useState(null);
+  const [selectedNewsId, setSelectedNewsId] = useState(null);
+  const [selectedNewsArticle, setSelectedNewsArticle] = useState(null);
   const { user, isLoggedIn, notification, clearNotification, logout } = useAuth();
 
   // If user arrives directly on an auth callback route
@@ -34,9 +38,13 @@ function AppContent() {
     }
   }, []);
 
-  const handleNavigate = (page, redirectTarget = null) => {
-    if (redirectTarget) {
-      setRedirectAfterAuth(redirectTarget);
+  const handleNavigate = (page, extra = null) => {
+    if (typeof extra === 'string') {
+      setRedirectAfterAuth(extra);
+    } else if (extra && typeof extra === 'object') {
+      if (extra.newsId) setSelectedNewsId(extra.newsId);
+      if (extra.article) setSelectedNewsArticle(extra.article);
+      if (extra.redirectTarget) setRedirectAfterAuth(extra.redirectTarget);
     }
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -69,6 +77,24 @@ function AppContent() {
         return <AnalysisPage currentPage={currentPage} onNavigate={handleNavigate} />;
       case 'graphs':
         return <GraphsAnalyticsPage onNavigate={handleNavigate} />;
+      case 'news':
+        return (
+          <RecentNewsPage
+            onNavigate={handleNavigate}
+            onSelectNews={(article) => {
+              setSelectedNewsArticle(article);
+              setSelectedNewsId(article.id || article.article_id || article.event_id);
+            }}
+          />
+        );
+      case 'news-detail':
+        return (
+          <NewsDetailPage
+            newsId={selectedNewsId}
+            initialArticle={selectedNewsArticle}
+            onNavigate={handleNavigate}
+          />
+        );
       case 'auth':
         return (
           <AuthPage

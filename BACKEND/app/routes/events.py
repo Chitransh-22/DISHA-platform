@@ -29,6 +29,15 @@ router = APIRouter(
     summary="Retrieve unified disaster and hazard events for map visualization",
 )
 async def list_unified_events(
+    time_range: Optional[str] = Query(
+        "24h",
+        alias="range",
+        description="Time filter ('24h', '7d', '15d', '30d', 'all'). Default: '24h'",
+    ),
+    days: Optional[int] = Query(
+        None,
+        description="Alternative days integer filter (1, 7, 15, 30)",
+    ),
     category: Optional[str] = Query(
         None,
         description="Filter by disaster category (e.g. 'Earthquake', 'Flood', 'Heavy Rain', 'Landslide', 'Lightning', 'Fire')",
@@ -54,7 +63,7 @@ async def list_unified_events(
         None,
         ge=1,
         le=2000,
-        description="Maximum events to return (default: None, returns all matching events from DB)",
+        description="Maximum events to return",
     ),
     skip: int = Query(
         0,
@@ -66,8 +75,10 @@ async def list_unified_events(
     Returns 100% real verified disaster events directly from MongoDB
     (NCS RISEQ Earthquakes, NDMA SACHET Alerts, and Verified Disaster News)
     with exact coordinates for Leaflet/GIS map plotting.
+    Time filtered at database query level (default: last 24 hours).
     """
     try:
+        effective_range = f"{days}d" if days is not None else (time_range or "24h")
         data = get_unified_events(
             category=category,
             severity=severity,
@@ -76,6 +87,7 @@ async def list_unified_events(
             state=state,
             limit=limit,
             skip=skip,
+            time_range=effective_range,
         )
         return data
     except Exception as e:

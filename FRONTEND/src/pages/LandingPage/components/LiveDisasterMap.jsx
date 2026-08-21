@@ -25,22 +25,7 @@ import {
 } from 'lucide-react';
 import { fetchEvents, fetchNearbyEmergencyServices } from '../../../services/api';
 import { IncidentDetailModal } from './IncidentDetailModal';
-
-// Presentation configuration for hazard threat categories
-const CATEGORY_STYLES = {
-  Earthquake: { color: '#ef4444', bg: 'bg-red-500', border: 'border-red-500', icon: '⚡', lightBg: 'bg-red-50 text-red-700 border-red-200' },
-  Flood: { color: '#f97316', bg: 'bg-orange-500', border: 'border-orange-500', icon: '🌊', lightBg: 'bg-orange-50 text-orange-700 border-orange-200' },
-  'Heavy Rain': { color: '#3b82f6', bg: 'bg-blue-500', border: 'border-blue-500', icon: '🌧️', lightBg: 'bg-blue-50 text-blue-700 border-blue-200' },
-  Landslide: { color: '#a855f7', bg: 'bg-purple-500', border: 'border-purple-500', icon: '⛰️', lightBg: 'bg-purple-50 text-purple-700 border-purple-200' },
-  Lightning: { color: '#eab308', bg: 'bg-yellow-500', border: 'border-yellow-500', icon: '⚡', lightBg: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
-  Cyclone: { color: '#10b981', bg: 'bg-emerald-500', border: 'border-emerald-500', icon: '🌀', lightBg: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  Fire: { color: '#f59e0b', bg: 'bg-amber-500', border: 'border-amber-500', icon: '🔥', lightBg: 'bg-amber-50 text-amber-700 border-amber-200' },
-  Cloudburst: { color: '#06b6d4', bg: 'bg-cyan-500', border: 'border-cyan-500', icon: '⛈️', lightBg: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
-  'Building Collapse': { color: '#e11d48', bg: 'bg-rose-600', border: 'border-rose-600', icon: '🏚️', lightBg: 'bg-rose-50 text-rose-700 border-rose-200' },
-  'Industrial Accident': { color: '#d97706', bg: 'bg-amber-600', border: 'border-amber-600', icon: '⚠️', lightBg: 'bg-amber-50 text-amber-700 border-amber-200' },
-  Explosion: { color: '#dc2626', bg: 'bg-red-600', border: 'border-red-600', icon: '💥', lightBg: 'bg-red-50 text-red-700 border-red-200' },
-  Other: { color: '#64748b', bg: 'bg-slate-500', border: 'border-slate-500', icon: '⚠️', lightBg: 'bg-slate-50 text-slate-700 border-slate-200' },
-};
+import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../../../config/eventConfig';
 
 export const LiveDisasterMap = () => {
   const mapContainerRef = useRef(null);
@@ -54,6 +39,9 @@ export const LiveDisasterMap = () => {
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [eventsError, setEventsError] = useState(null);
   const [sourceCounts, setSourceCounts] = useState({ total: 0, earthquakes: 0, sachet: 0, news: 0 });
+
+  // Time Range Filter State (Default: '24h')
+  const [timeRange, setTimeRange] = useState('24h');
 
   // Filters State
   const [activeSource, setActiveSource] = useState('all'); // 'all', 'ncs', 'sachet', 'news'
@@ -79,12 +67,12 @@ export const LiveDisasterMap = () => {
     new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
   );
 
-  // 1. Fetch 100% real database events from backend
-  const loadEventsData = async () => {
+  // 1. Fetch real database events from backend with time range filter
+  const loadEventsData = async (targetRange = timeRange) => {
     setLoadingEvents(true);
     setEventsError(null);
     try {
-      const data = await fetchEvents();
+      const data = await fetchEvents({ range: targetRange });
       if (data && Array.isArray(data.events)) {
         // Filter strictly to events with valid numeric coordinates
         const validEvents = data.events.filter(
@@ -125,8 +113,14 @@ export const LiveDisasterMap = () => {
     }
   };
 
+  const handleTimeRangeChange = (newRange) => {
+    if (newRange === timeRange) return;
+    setTimeRange(newRange);
+    loadEventsData(newRange);
+  };
+
   useEffect(() => {
-    loadEventsData();
+    loadEventsData('24h');
   }, []);
 
   // Compute category counts for sorting in descending order
@@ -374,8 +368,9 @@ export const LiveDisasterMap = () => {
 
       filteredEvents.forEach((ev) => {
         const isSelected = selectedEvent && selectedEvent.id === ev.id;
-        const style = CATEGORY_STYLES[ev.category] || CATEGORY_STYLES.Other;
-        const iconSymbol = style.icon || '⚠️';
+        const config = getCategoryConfig(ev.category || ev.disaster_type || ev.type);
+        const iconSymbol = config.icon || '⚠️';
+        const markerColor = config.color || '#ef4444';
 
         // Marker HTML with distinct styling for selected vs normal state
         const markerHtml = `
@@ -385,12 +380,12 @@ export const LiveDisasterMap = () => {
             ${
               isSelected
                 ? `<span class="animate-ping-slow absolute inline-flex h-11 w-11 rounded-full" style="background-color: #0284c7; opacity: 0.85;"></span>
-                   <span class="absolute inline-flex h-10 w-10 rounded-full border-2 border-cyan-400" style="background-color: ${style.color}44;"></span>`
-                : `<span class="animate-pulse-ring absolute inline-flex h-9 w-9 rounded-full" style="background-color: ${style.color}; opacity: 0.35;"></span>`
+                   <span class="absolute inline-flex h-10 w-10 rounded-full border-2 border-cyan-400" style="background-color: ${markerColor}44;"></span>`
+                : `<span class="animate-pulse-ring absolute inline-flex h-9 w-9 rounded-full" style="background-color: ${markerColor}; opacity: 0.35;"></span>`
             }
             <div class="relative w-8 h-8 rounded-full shadow-xl flex items-center justify-center text-white border-2 ${
               isSelected ? 'border-cyan-300 ring-4 ring-cyan-500/50' : 'border-white'
-            }" style="background-color: ${style.color};">
+            }" style="background-color: ${markerColor};">
               <span style="font-size: 13px;">${iconSymbol}</span>
             </div>
             ${
@@ -416,8 +411,9 @@ export const LiveDisasterMap = () => {
         popupContent.className = 'p-3.5 space-y-2.5 text-slate-100 max-w-[280px] font-sans';
         popupContent.innerHTML = `
           <div class="flex items-center justify-between gap-2 border-b border-white/10 pb-2">
-            <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full" style="background-color: ${style.color}33; color: ${style.color}; border: 1px solid ${style.color}66;">
-              ${ev.category || 'Disaster'}
+            <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1" style="background-color: ${markerColor}33; color: ${markerColor}; border: 1px solid ${markerColor}66;">
+              <span>${iconSymbol}</span>
+              <span>${config.label}</span>
             </span>
             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${
               ev.severity === 'Critical'
@@ -673,10 +669,37 @@ export const LiveDisasterMap = () => {
             </div>
           </div>
 
-          {/* Right Controls: Refresh + Status Indicator */}
-          <div className="flex items-center gap-3">
+          {/* Right Controls: Time Filter + Refresh + Status Indicator */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Time Filter (24 Hours [default], 7 Days, 15 Days, 30 Days) */}
+            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200/80 p-1 rounded-2xl shadow-2xs">
+              <span className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider pl-2 pr-1 flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-orange-500" />
+                <span className="hidden md:inline">Time:</span>
+              </span>
+              {[
+                { id: '24h', label: '24 Hours' },
+                { id: '7d', label: '7 Days' },
+                { id: '15d', label: '15 Days' },
+                { id: '30d', label: '30 Days' },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => handleTimeRangeChange(t.id)}
+                  disabled={loadingEvents}
+                  className={`px-2.5 sm:px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50 ${
+                    timeRange === t.id
+                      ? 'bg-orange-600 text-white shadow-xs'
+                      : 'bg-transparent text-slate-600 hover:bg-slate-200/80 hover:text-slate-900'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
             <button
-              onClick={loadEventsData}
+              onClick={() => loadEventsData(timeRange)}
               disabled={loadingEvents}
               className="p-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200/80 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer disabled:opacity-50"
               title="Sync Latest Sensor Data from Render Backend"
@@ -685,11 +708,11 @@ export const LiveDisasterMap = () => {
               <RefreshCw className={`w-4 h-4 ${loadingEvents ? 'animate-spin text-orange-600' : ''}`} />
             </button>
 
-            <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/80 px-3.5 py-2 rounded-2xl shadow-2xs">
+            <div className="hidden lg:flex items-center gap-3 bg-slate-50 border border-slate-200/80 px-3.5 py-2 rounded-2xl shadow-2xs">
               <Clock className="w-4 h-4 text-slate-400 shrink-0" />
-              <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
-                <span className="text-[10px] sm:text-xs text-slate-400 font-semibold uppercase tracking-wider">Backend Sync</span>
-                <span className="text-xs sm:text-sm font-bold text-slate-800 font-sans">{lastSyncTime}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Backend Sync</span>
+                <span className="text-sm font-bold text-slate-800 font-sans">{lastSyncTime}</span>
               </div>
 
               <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200">
@@ -697,7 +720,7 @@ export const LiveDisasterMap = () => {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
                 </span>
-                <span className="text-[11px] font-bold text-emerald-600 hidden md:inline">CONNECTED</span>
+                <span className="text-[11px] font-bold text-emerald-600">CONNECTED</span>
               </div>
             </div>
           </div>
@@ -810,7 +833,7 @@ export const LiveDisasterMap = () => {
               const isSelected = selectedCategories.includes(cat) || selectedCategories.includes('All');
               const isExplicitlySelected = selectedCategories.includes(cat);
               const count = categoryCounts[cat] || 0;
-              const style = CATEGORY_STYLES[cat] || CATEGORY_STYLES.Other;
+              const config = getCategoryConfig(cat);
 
               return (
                 <button
@@ -825,7 +848,7 @@ export const LiveDisasterMap = () => {
                   }`}
                   title={`Click to toggle ${cat} (${count} events)`}
                 >
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: style.color }} />
+                  <span className="shrink-0">{config.icon}</span>
                   <span>{cat}</span>
                   <span
                     className={`text-[10px] px-1.5 py-0.2 rounded-full ${
@@ -999,266 +1022,275 @@ export const LiveDisasterMap = () => {
 
           </div>
 
-          {/* DOCKED NEARBY EMERGENCY SERVICES PANEL (Opens when an incident is selected) */}
-          {selectedEvent && (
-            <div className="w-full md:w-[380px] lg:w-[420px] h-[340px] md:h-full bg-slate-900 text-slate-100 border-t md:border-t-0 md:border-l border-slate-700 flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200">
-              
-              {/* Panel Header */}
-              <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-                      Rescue Network
-                    </span>
-                    <span className="text-[10px] font-semibold text-slate-400">
-                      {nearbyServicesData?.zone_label || `${selectedRadiusM / 1000} km Local Area`}
-                    </span>
-                  </div>
-                  <h3 className="text-sm sm:text-base font-bold text-white mt-1 leading-snug">
-                    {selectedEvent.title}
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
-                    <MapPin className="w-3 h-3 text-orange-400 shrink-0" />
-                    <span>{selectedEvent.location || selectedEvent.state || 'Incident Coordinate Area'}</span>
-                  </p>
-                  <span className="inline-block mt-1 text-[9.5px] font-bold text-cyan-300 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-800/50">
-                    Source: {selectedEvent.source_label || selectedEvent.source}
-                  </span>
-                </div>
+          {/* DOCKED NEARBY EMERGENCY SERVICES & SITUATION PANEL (Opens when an incident is selected) */}
+          {selectedEvent && (() => {
+            const eventConfig = getCategoryConfig(selectedEvent.category || selectedEvent.disaster_type || selectedEvent.type);
+            return (
+              <div className="w-full md:w-[380px] lg:w-[420px] h-[360px] md:h-full bg-white text-slate-900 border-t md:border-t-0 md:border-l border-slate-200 flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200 font-sans">
+                
+                {/* Panel Header */}
+                <div className="p-4 bg-[#101318] text-white border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                      <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md border flex items-center gap-1 ${eventConfig.badge}`}>
+                        <span>{eventConfig.icon}</span>
+                        <span>{eventConfig.label}</span>
+                      </span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                        selectedEvent.severity === 'Critical'
+                          ? 'bg-red-600 text-white'
+                          : selectedEvent.severity === 'Severe'
+                          ? 'bg-orange-500 text-white'
+                          : 'bg-amber-500 text-white'
+                      }`}>
+                        {selectedEvent.severity || 'Moderate'}
+                      </span>
+                    </div>
 
-                <button
-                  onClick={handleDeselectEvent}
-                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-                  title="Close Rescue Panel"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Radius Selector Bar */}
-              <div className="px-4 py-2.5 bg-slate-950/60 border-b border-slate-800 flex items-center justify-between gap-2 shrink-0">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Search Radius:</span>
-                <div className="flex items-center gap-1.5">
-                  {[5000, 15000, 25000].map((radiusM) => {
-                    const radiusKm = radiusM / 1000;
-                    const isActive = selectedRadiusM === radiusM;
-                    return (
-                      <button
-                        key={radiusM}
-                        onClick={() => handleRadiusChange(radiusM)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
-                          isActive
-                            ? 'bg-cyan-600 text-white shadow-xs'
-                            : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                        }`}
-                      >
-                        {radiusKm} km
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Service Categories Filter Tabs & Counts */}
-              <div className="px-4 py-2 bg-slate-900 border-b border-slate-800 flex items-center gap-1.5 shrink-0 overflow-x-auto scrollbar-none">
-                <button
-                  onClick={() => setServiceFilterCategory('all')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
-                    serviceFilterCategory === 'all'
-                      ? 'bg-slate-700 text-white'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <span>All</span>
-                  <span className="text-[10px] px-1.5 py-0.2 bg-slate-800 rounded-full">
-                    {nearbyServicesData?.counts?.total || 0}
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => setServiceFilterCategory('medical')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
-                    serviceFilterCategory === 'medical'
-                      ? 'bg-cyan-900/60 text-cyan-200 border border-cyan-500/40'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <span>🏥 Medical</span>
-                  <span className="text-[10px] px-1.5 py-0.2 bg-slate-800 rounded-full">
-                    {nearbyServicesData?.counts?.medical || 0}
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => setServiceFilterCategory('police')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
-                    serviceFilterCategory === 'police'
-                      ? 'bg-indigo-900/60 text-indigo-200 border border-indigo-500/40'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <span>🚔 Police</span>
-                  <span className="text-[10px] px-1.5 py-0.2 bg-slate-800 rounded-full">
-                    {nearbyServicesData?.counts?.police || 0}
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => setServiceFilterCategory('fire')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
-                    serviceFilterCategory === 'fire'
-                      ? 'bg-amber-900/60 text-amber-200 border border-amber-500/40'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <span>🚒 Fire</span>
-                  <span className="text-[10px] px-1.5 py-0.2 bg-slate-800 rounded-full">
-                    {nearbyServicesData?.counts?.fire || 0}
-                  </span>
-                </button>
-              </div>
-
-              {/* Scrollable Facility Cards List */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {/* Loading State for Nearby Services */}
-                {loadingNearbyServices && (
-                  <div className="flex flex-col items-center justify-center py-12 text-center text-slate-400 space-y-3">
-                    <RefreshCw className="w-7 h-7 animate-spin text-cyan-400" />
-                    <div>
-                      <p className="text-sm font-bold text-white">Finding nearby emergency services...</p>
-                      <p className="text-xs text-slate-500 mt-1">Querying hospital, police, and fire rescue index</p>
+                    <h3 className="text-sm sm:text-base font-bold text-white mt-1 leading-snug truncate">
+                      {selectedEvent.title}
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-0.5 flex items-center gap-1 truncate">
+                      <MapPin className="w-3 h-3 text-orange-400 shrink-0" />
+                      <span>{selectedEvent.location || selectedEvent.state || 'Incident Area'}</span>
+                    </p>
+                    <div className="flex items-center gap-2 mt-1.5 text-[10.5px] text-slate-400 font-mono">
+                      <span>🕒 {selectedEvent.date} {selectedEvent.time ? `• ${selectedEvent.time}` : ''}</span>
                     </div>
                   </div>
-                )}
 
-                {/* Error State for Nearby Services */}
-                {nearbyServicesError && !loadingNearbyServices && (
-                  <div className="bg-red-950/40 border border-red-500/40 rounded-xl p-4 text-center space-y-2">
-                    <AlertTriangle className="w-6 h-6 text-red-400 mx-auto" />
-                    <p className="text-xs font-bold text-red-300">{nearbyServicesError}</p>
-                    <button
-                      onClick={() => handleSelectEvent(selectedEvent, selectedRadiusM)}
-                      className="text-xs font-semibold bg-red-900/60 hover:bg-red-800 text-white px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                    >
-                      Retry Lookup
-                    </button>
+                  <button
+                    onClick={handleDeselectEvent}
+                    className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                    title="Close Sidebar Panel"
+                    aria-label="Close"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Situation Summary & Coordinates Info Bar */}
+                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs text-slate-600 space-y-1.5 shrink-0">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>Source: <strong className="text-slate-800">{selectedEvent.source_label || selectedEvent.source}</strong></span>
+                    <span className="font-mono text-slate-700">
+                      {selectedEvent.latitude ? `${selectedEvent.latitude.toFixed(2)}°N, ${selectedEvent.longitude.toFixed(2)}°E` : ''}
+                    </span>
                   </div>
-                )}
-
-                {/* Empty State for Nearby Services */}
-                {!loadingNearbyServices && !nearbyServicesError && panelServiceList.length === 0 && (
-                  <div className="text-center py-12 text-slate-400 space-y-2">
-                    <Shield className="w-8 h-8 text-slate-600 mx-auto" />
-                    <p className="text-sm font-semibold text-slate-300">No emergency services found nearby</p>
-                    <p className="text-xs text-slate-500">
-                      Try expanding the search radius to 15 km or 25 km above.
+                  {selectedEvent.description && (
+                    <p className="text-[11.5px] text-slate-700 leading-snug line-clamp-2 bg-white p-2 rounded-lg border border-slate-200/80">
+                      {selectedEvent.description}
                     </p>
+                  )}
+                </div>
+
+                {/* Radius Selector Bar */}
+                <div className="px-4 py-2 bg-slate-100/80 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0">
+                  <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Rescue Radius:</span>
+                  <div className="flex items-center gap-1.5">
+                    {[5000, 15000, 25000].map((radiusM) => {
+                      const radiusKm = radiusM / 1000;
+                      const isActive = selectedRadiusM === radiusM;
+                      return (
+                        <button
+                          key={radiusM}
+                          onClick={() => handleRadiusChange(radiusM)}
+                          className={`px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-orange-600 text-white shadow-xs'
+                              : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                          }`}
+                        >
+                          {radiusKm} km
+                        </button>
+                      );
+                    })}
                   </div>
-                )}
+                </div>
 
-                {/* Render Discovered Facilities */}
-                {!loadingNearbyServices &&
-                  !nearbyServicesError &&
-                  panelServiceList.map((svc) => {
-                    let badgeBg = 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30';
-                    let categoryIcon = <HeartPulse className="w-3.5 h-3.5 text-cyan-400" />;
+                {/* Service Categories Filter Tabs */}
+                <div className="px-4 py-2 bg-white border-b border-slate-200 flex items-center gap-1.5 shrink-0 overflow-x-auto scrollbar-none">
+                  <button
+                    onClick={() => setServiceFilterCategory('all')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
+                      serviceFilterCategory === 'all'
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>All</span>
+                    <span className="text-[10px] px-1.5 py-0.2 bg-slate-800 text-white rounded-full">
+                      {nearbyServicesData?.counts?.total || 0}
+                    </span>
+                  </button>
 
-                    if (svc.category === 'police') {
-                      badgeBg = 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30';
-                      categoryIcon = <Shield className="w-3.5 h-3.5 text-indigo-400" />;
-                    } else if (svc.category === 'fire') {
-                      badgeBg = 'bg-amber-500/10 text-amber-400 border-amber-500/30';
-                      categoryIcon = <Flame className="w-3.5 h-3.5 text-amber-400" />;
-                    }
+                  <button
+                    onClick={() => setServiceFilterCategory('medical')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
+                      serviceFilterCategory === 'medical'
+                        ? 'bg-cyan-600 text-white'
+                        : 'bg-cyan-50 text-cyan-800 hover:bg-cyan-100 border border-cyan-200'
+                    }`}
+                  >
+                    <span>🏥 Hospitals</span>
+                    <span className="text-[10px] px-1.5 py-0.2 bg-cyan-700 text-white rounded-full">
+                      {nearbyServicesData?.counts?.medical || 0}
+                    </span>
+                  </button>
 
-                    return (
-                      <div
-                        key={svc.id}
-                        className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-cyan-500/40 rounded-xl p-3.5 transition-all duration-150 space-y-2.5 shadow-sm"
+                  <button
+                    onClick={() => setServiceFilterCategory('police')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
+                      serviceFilterCategory === 'police'
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-indigo-50 text-indigo-800 hover:bg-indigo-100 border border-indigo-200'
+                    }`}
+                  >
+                    <span>🚔 Police</span>
+                    <span className="text-[10px] px-1.5 py-0.2 bg-indigo-700 text-white rounded-full">
+                      {nearbyServicesData?.counts?.police || 0}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setServiceFilterCategory('fire')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
+                      serviceFilterCategory === 'fire'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                    }`}
+                  >
+                    <span>🚒 Fire Rescue</span>
+                    <span className="text-[10px] px-1.5 py-0.2 bg-amber-700 text-white rounded-full">
+                      {nearbyServicesData?.counts?.fire || 0}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Scrollable Discovered Rescue Facility Cards List */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
+                  {loadingNearbyServices && (
+                    <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-2.5">
+                      <RefreshCw className="w-7 h-7 animate-spin text-orange-600" />
+                      <div>
+                        <p className="text-sm font-bold text-slate-800">Locating response facilities...</p>
+                        <p className="text-xs text-slate-500">Querying hospital, police, and fire rescue index</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {nearbyServicesError && !loadingNearbyServices && (
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center space-y-2">
+                      <AlertTriangle className="w-5 h-5 text-red-500 mx-auto" />
+                      <p className="text-xs font-bold text-red-700">{nearbyServicesError}</p>
+                      <button
+                        onClick={() => handleSelectEvent(selectedEvent, selectedRadiusM)}
+                        className="text-xs font-semibold bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                       >
-                        {/* Title & Distance Bar */}
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border flex items-center gap-1 ${badgeBg}`}>
-                                {categoryIcon}
-                                <span>{svc.category_label || svc.category}</span>
+                        Retry Lookup
+                      </button>
+                    </div>
+                  )}
+
+                  {!loadingNearbyServices && !nearbyServicesError && panelServiceList.length === 0 && (
+                    <div className="text-center py-10 text-slate-400 space-y-2">
+                      <Shield className="w-8 h-8 text-slate-400 mx-auto" />
+                      <p className="text-sm font-semibold text-slate-700">No facilities found within {selectedRadiusM / 1000} km</p>
+                      <p className="text-xs text-slate-500">
+                        Try expanding the radius to 15 km or 25 km above.
+                      </p>
+                    </div>
+                  )}
+
+                  {!loadingNearbyServices &&
+                    !nearbyServicesError &&
+                    panelServiceList.map((svc) => {
+                      let badgeBg = 'bg-cyan-50 text-cyan-800 border-cyan-200';
+                      let categoryIcon = <HeartPulse className="w-3.5 h-3.5 text-cyan-600" />;
+
+                      if (svc.category === 'police') {
+                        badgeBg = 'bg-indigo-50 text-indigo-800 border-indigo-200';
+                        categoryIcon = <Shield className="w-3.5 h-3.5 text-indigo-600" />;
+                      } else if (svc.category === 'fire') {
+                        badgeBg = 'bg-amber-50 text-amber-800 border-amber-200';
+                        categoryIcon = <Flame className="w-3.5 h-3.5 text-amber-600" />;
+                      }
+
+                      return (
+                        <div
+                          key={svc.id}
+                          className="bg-white hover:border-orange-400 border border-slate-200 rounded-xl p-3.5 transition-all duration-150 space-y-2.5 shadow-xs"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border flex items-center gap-1 ${badgeBg}`}>
+                                  {categoryIcon}
+                                  <span>{svc.category_label || svc.category}</span>
+                                </span>
+                              </div>
+                              <h4 className="text-sm font-bold text-slate-900 leading-snug">{svc.name}</h4>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <span className="text-xs font-mono font-bold text-orange-600 block">
+                                {svc.distance_formatted || `${svc.distance_km} km`}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {svc.estimated_time_formatted || '~4 min'}
                               </span>
                             </div>
-                            <h4 className="text-sm font-bold text-white leading-snug">{svc.name}</h4>
                           </div>
 
-                          <div className="text-right shrink-0">
-                            <span className="text-xs font-mono font-bold text-cyan-300 block">
-                              {svc.distance_formatted || `${svc.distance_km} km`}
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              {svc.estimated_time_formatted || '~4 min'}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Address */}
-                        {svc.address && (
-                          <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
-                            📍 {svc.address}
-                          </p>
-                        )}
-
-                        {/* Action Buttons: Directions & Phone */}
-                        <div className="flex items-center gap-2 pt-1">
-                          {svc.phone && (
-                            <a
-                              href={`tel:${svc.phone.replace(/[^0-9+]/g, '')}`}
-                              className="flex-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 font-bold text-xs py-1.5 px-2.5 rounded-lg transition-colors flex items-center justify-center gap-1.5"
-                            >
-                              <Phone className="w-3.5 h-3.5" />
-                              <span>{svc.phone}</span>
-                            </a>
+                          {svc.address && (
+                            <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">
+                              📍 {svc.address}
+                            </p>
                           )}
 
-                          <a
-                            href={
-                              svc.directions_url ||
-                              `https://www.google.com/maps/dir/?api=1&origin=${selectedEvent.latitude},${selectedEvent.longitude}&destination=${svc.latitude},${svc.longitude}`
-                            }
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-1.5 px-2.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-                          >
-                            <Navigation className="w-3.5 h-3.5" />
-                            <span>Get Directions</span>
-                          </a>
+                          <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
+                            <a
+                              href={
+                                svc.directions_url ||
+                                `https://www.google.com/maps/dir/?api=1&origin=${selectedEvent.latitude},${selectedEvent.longitude}&destination=${svc.latitude},${svc.longitude}`
+                              }
+                              target="_blank"
+                              rel="noreferrer"
+                              className="w-full bg-slate-900 hover:bg-orange-600 text-white font-bold text-xs py-2 px-3 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                            >
+                              <Navigation className="w-3.5 h-3.5" />
+                              <span>Get Google Maps Directions ↗</span>
+                            </a>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-              </div>
+                      );
+                    })}
+                </div>
 
-              {/* Panel Footer */}
-              <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2 shrink-0">
-                <button
-                  onClick={() => setModalIncident(selectedEvent)}
-                  className="text-xs font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <span>Full Incident Briefing</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={handleDeselectEvent}
-                  className="text-xs font-semibold text-slate-400 hover:text-white transition-colors cursor-pointer"
-                >
-                  Close Panel
-                </button>
-              </div>
+                {/* Panel Footer */}
+                <div className="p-3 bg-white border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
+                  <button
+                    onClick={() => setModalIncident(selectedEvent)}
+                    className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <span>Full Incident Briefing</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={handleDeselectEvent}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                  >
+                    Close Panel
+                  </button>
+                </div>
 
-            </div>
-          )}
+              </div>
+            );
+          })()}
 
         </div>
 
-        {/* FULLY UPDATED COMPREHENSIVE MAP LEGEND BAR (DYNAMICALLY SORTED DESCENDING BY EVENT COUNT) */}
+        {/* FULLY UPDATED COMPREHENSIVE MAP LEGEND BAR (USING CENTRALIZED EVENT CONFIG) */}
         <div className="px-4 sm:px-8 py-4 bg-slate-50 border-t border-slate-200/80 flex flex-col gap-3 text-xs">
           
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1281,26 +1313,23 @@ export const LiveDisasterMap = () => {
             <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2">
               {sortedCategories.map((cat) => {
                 const count = categoryCounts[cat] || 0;
-                const style = CATEGORY_STYLES[cat] || CATEGORY_STYLES.Other;
+                const config = getCategoryConfig(cat);
                 const isSelected = selectedCategories.includes(cat) || selectedCategories.includes('All');
 
                 return (
                   <button
                     key={cat}
                     onClick={() => handleToggleCategory(cat)}
-                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
                       isSelected
-                        ? 'text-slate-800 hover:bg-slate-200/60'
-                        : 'text-slate-400 opacity-60 hover:opacity-100 hover:bg-slate-100'
+                        ? `${config.lightBg} shadow-xs font-bold`
+                        : 'bg-white text-slate-400 border-slate-200 opacity-60 hover:opacity-100 hover:bg-slate-50'
                     }`}
                     title={`Click to filter ${cat}`}
                   >
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shadow-2xs shrink-0"
-                      style={{ backgroundColor: style.color }}
-                    />
+                    <span>{config.icon}</span>
                     <span>{cat}</span>
-                    <span className="text-[10px] font-mono text-slate-500 bg-slate-200/80 px-1 py-0.2 rounded font-bold">
+                    <span className="text-[10px] font-mono bg-white/80 px-1 py-0.2 rounded font-bold border border-slate-200/60">
                       {count}
                     </span>
                   </button>

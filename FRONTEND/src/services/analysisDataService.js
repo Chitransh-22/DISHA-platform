@@ -9,14 +9,7 @@
  * 
  * ZERO dummy, fabricated, or mixed-up mock data.
  */
-import { DISASTER_INCIDENTS } from '../data/disasterData.js';
-
-// Production & Local Backend Fallback resolver
-const PRIMARY_API_BASE = typeof window !== 'undefined' && window.location.hostname === 'localhost'
-  ? '' // In local dev with Vite proxy, use relative /api
-  : 'https://disha-platform.onrender.com';
-
-const FALLBACK_API_BASE = 'https://disha-platform.onrender.com';
+import { getApiBaseUrl } from './api.js';
 
 // State Land Areas in sq km (for density calculation)
 const STATE_LAND_AREAS = {
@@ -115,20 +108,29 @@ const STATE_TO_TERRAIN = {
 };
 
 /**
- * Helper to fetch with 20s timeout and direct live backend URL
+ * Helper to fetch with fast local backend priority and fallback
  */
 async function fetchEndpointWithFallback(endpoint) {
-  const urls = [
-    `https://disha-platform.onrender.com${endpoint}`,
-  ];
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+  const baseUrl = getApiBaseUrl();
+  const urls = [];
+
+  // 1. Primary configured base URL or relative endpoint
+  urls.push(`${baseUrl}${endpoint}`);
+
+  // 2. Local fallback if window is available
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && baseUrl !== '') {
     urls.push(endpoint);
+  }
+
+  // 3. Remote Render fallback
+  if (!urls.includes(`https://disha-platform.onrender.com${endpoint}`)) {
+    urls.push(`https://disha-platform.onrender.com${endpoint}`);
   }
 
   for (const url of urls) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
       const res = await fetch(url, { signal: controller.signal });
       clearTimeout(timeoutId);
       if (res && res.ok) {
@@ -136,7 +138,7 @@ async function fetchEndpointWithFallback(endpoint) {
         if (data) return data;
       }
     } catch (err) {
-      // Try next url
+      // Continue to next candidate URL
     }
   }
   return null;

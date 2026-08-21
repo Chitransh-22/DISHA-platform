@@ -1,12 +1,11 @@
 import React from 'react';
 import { X, ShieldAlert, Phone, Users, Clock, MapPin, Radio, Navigation } from 'lucide-react';
-import { DISASTER_TYPES_CONFIG } from '../../../data/disasterData';
+import { getCategoryConfig } from '../../../config/eventConfig';
 
 export const IncidentDetailModal = ({ incident, onClose, onFindNearbyServices }) => {
   if (!incident) return null;
 
-  const categoryName = incident.category || incident.type || 'Other';
-  const config = DISASTER_TYPES_CONFIG[categoryName] || DISASTER_TYPES_CONFIG.Other;
+  const config = getCategoryConfig(incident.category || incident.type || incident.disaster_type);
 
   const timeDisplay =
     incident.timeAgo ||
@@ -31,8 +30,9 @@ export const IncidentDetailModal = ({ incident, onClose, onFindNearbyServices })
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-orange-400">
-                  {categoryName}
+                <span className="text-xs uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-orange-400 flex items-center gap-1">
+                  <span>{config.icon}</span>
+                  <span>{config.label}</span>
                 </span>
                 <span
                   className={`text-xs font-bold px-2 py-0.5 rounded-full ${
