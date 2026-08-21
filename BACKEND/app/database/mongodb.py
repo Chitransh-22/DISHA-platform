@@ -94,7 +94,15 @@ def init_db_indexes(database):
         # sync_state collection for ETag and last-modified caching
         database["sync_state"].create_index([("pipeline", ASCENDING)], unique=True, background=True)
 
-        print("[MongoDB] Indexes initialized successfully")
+        # incident_reports collection (Citizen disaster incident submissions)
+        database["incident_reports"].create_index([("report_id", ASCENDING)], unique=True, background=True)
+        database["incident_reports"].create_index([("user_id", ASCENDING)], background=True)
+        database["incident_reports"].create_index([("event_type", ASCENDING)], background=True)
+        database["incident_reports"].create_index([("status", ASCENDING)], background=True)
+        database["incident_reports"].create_index([("created_at", DESCENDING)], background=True)
+        database["incident_reports"].create_index([("location.coordinates", "2dsphere")], sparse=True, background=True)
+
+        print("[MongoDB] Indexes initialized successfully (including incident_reports)")
     except PyMongoError as err:
         print(f"[MongoDB] Index initialization notice: {err}")
 

@@ -765,4 +765,20 @@ export const authLogoutAll = async () => {
   return { success: true };
 };
 
+/**
+ * Submits a citizen disaster incident report to the backend.
+ */
+export const submitIncidentReport = async (reportData) => {
+  const response = await authenticatedFetch('/api/incidents/report', {
+    method: 'POST',
+    body: JSON.stringify(reportData),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(parseErrorMessage(data, response.status));
+  }
+  return data;
+};
+
 

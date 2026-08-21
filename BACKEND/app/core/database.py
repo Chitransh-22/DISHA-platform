@@ -146,6 +146,29 @@ async def init_auth_indexes(db: Optional[AsyncIOMotorDatabase] = None):
         logger.warning(f"[Database] Unexpected index setup notice: {err}")
 
 
+async def init_incident_indexes(db: Optional[AsyncIOMotorDatabase] = None):
+    """
+    Initializes indexes for the incident_reports collection.
+    Idempotent and safe: preserves existing data and handles index creation gracefully.
+    """
+    if db is None:
+        db = get_async_db()
+
+    try:
+        # 4. Incident Reports collection indexes
+        await db["incident_reports"].create_index([("report_id", ASCENDING)], unique=True, background=True)
+        await db["incident_reports"].create_index([("user_id", ASCENDING)], background=True)
+        await db["incident_reports"].create_index([("event_type", ASCENDING)], background=True)
+        await db["incident_reports"].create_index([("status", ASCENDING)], background=True)
+        await db["incident_reports"].create_index([("created_at", DESCENDING)], background=True)
+        await db["incident_reports"].create_index([("location.coordinates", "2dsphere")], sparse=True, background=True)
+        logger.info("[Database] Report Incident collection and indexes verified successfully.")
+    except PyMongoError as err:
+        logger.warning(f"[Database] Incident index initialization notice: {err}")
+    except Exception as err:
+        logger.warning(f"[Database] Unexpected incident index setup notice: {err}")
+
+
 async def close_db_connections():
     """
     Closes async and sync database connections gracefully.

@@ -25,8 +25,13 @@ export const AuthProvider = ({ children }) => {
     return !getStoredUser() && (!!getAccessToken() || localStorage.getItem('disha_has_session') === 'true');
   });
   const [authError, setAuthError] = useState(null);
+  const [notification, setNotification] = useState(null);
 
   const clearAuthError = useCallback(() => setAuthError(null), []);
+  const clearNotification = useCallback(() => setNotification(null), []);
+  const showNotification = useCallback((type, message) => {
+    setNotification({ type, message });
+  }, []);
 
   /**
    * Loads user profile using the current access token.
@@ -75,6 +80,10 @@ export const AuthProvider = ({ children }) => {
           if (isMounted && profile?.user) {
             setUser(profile.user);
             setStoredUser(profile.user);
+            setNotification({
+              type: 'success',
+              message: 'Sign in successful',
+            });
           }
           if (isMounted) setIsLoading(false);
           return;
@@ -86,6 +95,10 @@ export const AuthProvider = ({ children }) => {
           window.history.replaceState({}, document.title, cleanPath);
           if (isMounted) {
             setAuthError(decodeURIComponent(errorFromUrl));
+            setNotification({
+              type: 'error',
+              message: decodeURIComponent(errorFromUrl),
+            });
             setIsLoading(false);
           }
           return;
@@ -166,8 +179,16 @@ export const AuthProvider = ({ children }) => {
     if (data?.user) {
       setUser(data.user);
       setStoredUser(data.user);
+      setNotification({
+        type: 'success',
+        message: 'Sign in successful',
+      });
     } else {
       await refreshUser();
+      setNotification({
+        type: 'success',
+        message: 'Sign in successful',
+      });
     }
     return data;
   }, [refreshUser]);
@@ -177,7 +198,14 @@ export const AuthProvider = ({ children }) => {
    */
   const loginWithToken = useCallback(async (token, refreshToken = null) => {
     setAccessToken(token, refreshToken);
-    return await refreshUser();
+    const u = await refreshUser();
+    if (u) {
+      setNotification({
+        type: 'success',
+        message: 'Sign in successful',
+      });
+    }
+    return u;
   }, [refreshUser]);
 
   /**
@@ -193,7 +221,16 @@ export const AuthProvider = ({ children }) => {
    */
   const verifyEmail = useCallback(async ({ email, otp }) => {
     setAuthError(null);
-    return await authVerifyEmail({ email, otp });
+    const res = await authVerifyEmail({ email, otp });
+    if (res?.user) {
+      setUser(res.user);
+      setStoredUser(res.user);
+      setNotification({
+        type: 'success',
+        message: 'Sign in successful',
+      });
+    }
+    return res;
   }, []);
 
   /**
@@ -219,18 +256,22 @@ export const AuthProvider = ({ children }) => {
    * Log out current session.
    */
   const logout = useCallback(async () => {
+    setNotification(null);
     await authLogout();
     setUser(null);
-    setAccessToken(null);
+    setAccessToken(null, null);
+    setStoredUser(null);
   }, []);
 
   /**
    * Log out all active sessions across devices.
    */
   const logoutAll = useCallback(async () => {
+    setNotification(null);
     await authLogoutAll();
     setUser(null);
-    setAccessToken(null);
+    setAccessToken(null, null);
+    setStoredUser(null);
   }, []);
 
   const value = {
@@ -241,6 +282,9 @@ export const AuthProvider = ({ children }) => {
     authError,
     setAuthError,
     clearAuthError,
+    notification,
+    showNotification,
+    clearNotification,
     login,
     loginWithToken,
     register,

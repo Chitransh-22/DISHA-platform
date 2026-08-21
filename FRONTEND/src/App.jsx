@@ -8,12 +8,13 @@ import { NearbyIncidentsPage } from './pages/NearbyIncidentsPage';
 import { AnalysisPage } from './pages/AnalysisPage/AnalysisPage';
 import { GraphsAnalyticsPage } from './pages/AnalysisPage/GraphsAnalyticsPage';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { NotificationToast } from './components/common/NotificationToast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 function AppContent() {
   const [currentPage, setCurrentPage] = useState('landing');
   const [redirectAfterAuth, setRedirectAfterAuth] = useState(null);
-  const { user, isLoggedIn, logout } = useAuth();
+  const { user, isLoggedIn, notification, clearNotification, logout } = useAuth();
 
   // If user arrives directly on an auth callback route
   useEffect(() => {
@@ -94,6 +95,7 @@ function AppContent() {
 
   return (
     <ErrorBoundary title="DISHA Application Error">
+      <NotificationToast notification={notification} onClose={clearNotification} />
       {renderContent()}
     </ErrorBoundary>
   );

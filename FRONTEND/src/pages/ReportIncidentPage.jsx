@@ -5,6 +5,7 @@ import {
   FileText, Zap, Clock
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { submitIncidentReport } from '../services/api';
 
 
 
@@ -172,11 +173,34 @@ export const ReportIncidentPage = ({ onNavigate, isLoggedIn: propIsLoggedIn }) =
     e.preventDefault();
     if (!validate()) return;
     setSubmitting(true);
-    await new Promise(r => setTimeout(r, 2000)); // simulate API call
-    const id = 'INC-' + Date.now().toString().slice(-6);
-    setReportId(id);
-    setSubmitting(false);
-    setSubmitted(true);
+    setErrors(prev => ({ ...prev, submit: '' }));
+
+    try {
+      const payload = {
+        event_type: eventType,
+        description: description.trim(),
+        location: {
+          lat: location.lat,
+          lng: location.lng,
+          latitude: location.lat,
+          longitude: location.lng,
+          address: location.address,
+        },
+        images: images.map(img => ({ name: img.name, url: img.url })),
+      };
+
+      const res = await submitIncidentReport(payload);
+      const generatedId = res.report_id || res.report?.report_id || ('INC-' + Date.now().toString().slice(-6));
+      setReportId(generatedId);
+      setSubmitted(true);
+    } catch (err) {
+      setErrors(prev => ({
+        ...prev,
+        submit: err.message || 'Failed to submit incident report. Please check your connection and try again.',
+      }));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // ── Success Screen ──
@@ -393,6 +417,14 @@ export const ReportIncidentPage = ({ onNavigate, isLoggedIn: propIsLoggedIn }) =
                 </div>
               )}
             </div>
+
+            {/* ── Submit Error ── */}
+            {errors.submit && (
+              <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+                <span>{errors.submit}</span>
+              </div>
+            )}
 
             {/* ── Submit Button ── */}
             <button
