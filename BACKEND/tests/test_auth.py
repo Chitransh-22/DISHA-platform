@@ -560,7 +560,7 @@ def test_email_service_masking_and_fallbacks():
     """
     Tests email recipient masking and environment fallback behavior.
     """
-    from app.services.email_service import mask_recipient, _send_smtp_email_sync
+    from app.services.email_service import mask_recipient, _send_brevo_email_sync
 
     assert mask_recipient("john@example.com") == "j**n@example.com"
     assert mask_recipient("shashwat@gmail.com") == "s****t@gmail.com"
@@ -568,8 +568,46 @@ def test_email_service_masking_and_fallbacks():
     assert mask_recipient("") == "******"
 
     # In dev mode, unconfigured email returns True (simulation)
-    res = _send_smtp_email_sync("test@example.com", "Test Subject", "<p>Test</p>", "123456")
+    res = _send_brevo_email_sync("test@example.com", "Test Subject", "<p>Test</p>", "123456")
     assert res is True
+
+
+@pytest.mark.asyncio
+async def test_brevo_https_email_delivery_mock(monkeypatch):
+    """
+    Tests Brevo HTTPS API delivery with mocked HTTP client responses.
+    """
+    from app.services.email_service import send_verification_email
+    import httpx
+
+    # 1. Test success (HTTP 201 Created)
+    async def mock_post_success(self, url, headers=None, json=None):
+        class MockResponse:
+            status_code = 201
+            text = '{"messageId":"<mock-123>"}'
+            def json(self):
+                return {"messageId": "<mock-123>"}
+        return MockResponse()
+
+    monkeypatch.setattr(settings, "BREVO_API_KEY", "xkeysib-mock-key-12345")
+    monkeypatch.setattr(settings, "BREVO_SENDER_EMAIL", "disha-alerts@gmail.com")
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post_success)
+
+    sent = await send_verification_email("user@example.com", "987654", "Mock User")
+    assert sent is True
+
+    # 2. Test error response from Brevo (HTTP 401 Unauthorized)
+    async def mock_post_error(self, url, headers=None, json=None):
+        class MockResponse:
+            status_code = 401
+            text = '{"code":"unauthorized","message":"Key not found"}'
+            def json(self):
+                return {"code": "unauthorized", "message": "Key not found"}
+        return MockResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post_error)
+    sent_err = await send_verification_email("user@example.com", "987654", "Mock User")
+    assert sent_err is False
 
 
 @pytest.mark.asyncio

@@ -104,7 +104,27 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GOOGLE_REFRESH_TOKEN", "GMAIL_REFRESH_TOKEN"),
     )
 
-    # SMTP / Gmail App Password Email Configuration
+    # Brevo (Sendinblue) Transactional HTTPS API Configuration
+    BREVO_API_KEY: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "BREVO_API_KEY", "SENDINBLUE_API_KEY", "BREVO_KEY", "SIB_API_KEY"
+        ),
+    )
+    BREVO_SENDER_EMAIL: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "BREVO_SENDER_EMAIL", "BREVO_FROM_EMAIL", "BREVO_EMAIL", "MAIL_FROM", "SMTP_FROM"
+        ),
+    )
+    BREVO_SENDER_NAME: str = Field(
+        default="DISHA Platform",
+        validation_alias=AliasChoices(
+            "BREVO_SENDER_NAME", "BREVO_FROM_NAME", "BREVO_NAME"
+        ),
+    )
+
+    # SMTP / Gmail App Password Email Configuration (Legacy / Local fallback)
     SMTP_HOST: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("SMTP_HOST", "EMAIL_HOST", "MAIL_HOST", "EMAIL_SERVER"),
