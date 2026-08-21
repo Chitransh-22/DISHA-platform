@@ -517,3 +517,58 @@ async def test_google_callback_success_flow(monkeypatch):
         await user_repo.collection.delete_one({"email": mock_email})
         await session_repo.collection.delete_many({"user_id": user["id"]})
 
+
+def test_effective_url_resolvers():
+    """
+    Tests that Settings resolves OAuth redirect URIs and frontend URLs properly
+    in development vs production, preventing accidental localhost redirects in production.
+    """
+    from app.core.config import Settings
+
+    # 1. Development Settings
+    dev_settings = Settings(
+        ENVIRONMENT="development",
+        FRONTEND_URL="http://localhost:5173",
+        GOOGLE_REDIRECT_URI="http://localhost:8000/api/auth/google/callback",
+    )
+    assert dev_settings.get_effective_frontend_url() == "http://localhost:5173"
+    assert dev_settings.get_effective_google_redirect_uri() == "http://localhost:8000/api/auth/google/callback"
+
+    # 2. Production Settings with localhost misconfiguration fallback
+    prod_misconfigured = Settings(
+        ENVIRONMENT="production",
+        FRONTEND_URL="http://localhost:5173",
+        BACKEND_URL="https://disha-platform.onrender.com",
+        GOOGLE_REDIRECT_URI="http://localhost:8000/api/auth/google/callback",
+    )
+    # Must protect against localhost in production
+    assert prod_misconfigured.get_effective_frontend_url() == "https://disha-platform.vercel.app"
+    assert prod_misconfigured.get_effective_google_redirect_uri() == "https://disha-platform.onrender.com/api/auth/google/callback"
+
+    # 3. Production Settings with explicit production URLs
+    prod_configured = Settings(
+        ENVIRONMENT="production",
+        FRONTEND_URL="https://disha-platform.vercel.app",
+        BACKEND_URL="https://disha-platform.onrender.com",
+        GOOGLE_REDIRECT_URI="https://disha-platform.onrender.com/api/auth/google/callback",
+    )
+    assert prod_configured.get_effective_frontend_url() == "https://disha-platform.vercel.app"
+    assert prod_configured.get_effective_google_redirect_uri() == "https://disha-platform.onrender.com/api/auth/google/callback"
+
+
+def test_email_service_masking_and_fallbacks():
+    """
+    Tests email recipient masking and environment fallback behavior.
+    """
+    from app.services.email_service import mask_recipient, _send_smtp_email_sync
+
+    assert mask_recipient("john@example.com") == "j**n@example.com"
+    assert mask_recipient("shashwat@gmail.com") == "s****t@gmail.com"
+    assert mask_recipient("ab@disha.gov.in") == "a*@disha.gov.in"
+    assert mask_recipient("") == "******"
+
+    # In dev mode, unconfigured email returns True (simulation)
+    res = _send_smtp_email_sync("test@example.com", "Test Subject", "<p>Test</p>", "123456")
+    assert res is True
+
+

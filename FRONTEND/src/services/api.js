@@ -18,7 +18,7 @@ export const getApiBaseUrl = () => {
   if (ENV_API_URL && ENV_API_URL.trim()) {
     return ENV_API_URL.trim().replace(/\/+$/, '');
   }
-  if (IS_PROD) {
+  if (IS_PROD || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')) {
     return 'https://disha-platform.onrender.com';
   }
   return '';
@@ -518,10 +518,10 @@ export const getAuthHeaders = (extraHeaders = {}) => {
  */
 export const authGoogleLoginUrl = () => {
   const baseUrl = getApiBaseUrl();
-  if (!baseUrl && !IS_PROD) {
-    return 'http://127.0.0.1:8000/api/auth/google/login';
+  if (baseUrl) {
+    return `${baseUrl}/api/auth/google/login`;
   }
-  return `${baseUrl}/api/auth/google/login`;
+  return '/api/auth/google/login';
 };
 
 /**
