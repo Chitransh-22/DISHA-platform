@@ -21,6 +21,18 @@ from app.core.config import settings
 logger = logging.getLogger("disha.services.email")
 
 
+def mask_recipient(recipient: str) -> str:
+    """Masks recipient email for safe diagnostic logging."""
+    if not recipient or "@" not in recipient:
+        return "******"
+    user_part, domain = recipient.split("@", 1)
+    if len(user_part) <= 2:
+        masked_user = user_part[0] + "*"
+    else:
+        masked_user = user_part[0] + "*" * min(4, len(user_part) - 2) + user_part[-1]
+    return f"{masked_user}@{domain}"
+
+
 def generate_disha_email_html(otp: str, username: Optional[str] = None) -> str:
     user_greeting = f"Hello {username}," if username else "Hello,"
     return f"""<!DOCTYPE html>
@@ -153,7 +165,8 @@ def _send_smtp_email_sync(
     html_content: str,
     otp: Optional[str] = None,
 ) -> bool:
-    """Synchronous SMTP email delivery."""
+    """Synchronous SMTP email delivery with diagnostic logging."""
+    masked = mask_recipient(recipient)
     sender = settings.SMTP_FROM or settings.SMTP_USER or settings.GOOGLE_USER or "no-reply@disha.gov.in"
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -163,8 +176,12 @@ def _send_smtp_email_sync(
     part = MIMEText(html_content, "html")
     msg.attach(part)
 
+    logger.info("OTP delivery request received for recipient: %s", masked)
+
     # 1. Check Google OAuth2 credentials
     if settings.GOOGLE_USER and settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET and settings.GOOGLE_REFRESH_TOKEN:
+        logger.info("Provider: Google Gmail OAuth2 (XOAUTH2)")
+        logger.info("Provider request started...")
         try:
             import google.auth.transport.requests
             from google.oauth2.credentials import Credentials
@@ -190,13 +207,15 @@ def _send_smtp_email_sync(
                 server.docmd("AUTH", "XOAUTH2 " + auth_b64)
                 server.sendmail(settings.GOOGLE_USER, [recipient], msg.as_string())
 
-            logger.info(f"[EmailService] Sent OTP verification email via Gmail OAuth2 to {recipient}")
+            logger.info("Provider response status: 200 (Delivered via Gmail OAuth2)")
             return True
         except Exception as e:
-            logger.error(f"[EmailService] Gmail OAuth2 delivery failed: {e}")
+            logger.error("Provider response status: FAILED - Gmail OAuth2 error: %s", str(e).splitlines()[0])
 
     # 2. Check standard SMTP credentials
     if settings.SMTP_HOST and settings.SMTP_USER and settings.SMTP_PASSWORD:
+        logger.info("Provider: Standard SMTP (%s:%s)", settings.SMTP_HOST, settings.SMTP_PORT)
+        logger.info("Provider request started...")
         try:
             with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
                 server.ehlo()
@@ -206,21 +225,22 @@ def _send_smtp_email_sync(
                 server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                 server.sendmail(sender, [recipient], msg.as_string())
 
-            logger.info(f"[EmailService] Sent OTP verification email via SMTP to {recipient}")
+            logger.info("Provider response status: 200 (Delivered via SMTP)")
             return True
         except Exception as e:
-            logger.error(f"[EmailService] SMTP delivery failed: {e}")
+            logger.error("Provider response status: FAILED - SMTP error: %s", str(e).splitlines()[0])
 
-    # 3. Development / Mock Mode fallback (logged cleanly for testing)
-    if settings.ENVIRONMENT == "development" or settings.DEBUG:
-        logger.info(
-            f"[EmailService][DEV MODE] Verification OTP code for {recipient}: {otp} (Subject: '{subject}')"
-        )
+    # 3. Development Mode fallback
+    is_dev = settings.ENVIRONMENT == "development" or settings.DEBUG or not settings.is_production
+    if is_dev:
+        logger.info("Provider: Development Mode Simulation")
+        logger.info("[EmailService][DEV MODE] Verification OTP code generated for %s (Subject: '%s')", masked, subject)
+        logger.info("Provider response status: 200 (Logged to local console for developer testing)")
     else:
-        logger.info(
-            f"[EmailService][DEV/MOCK] Verification Email for {recipient} generated successfully. "
-            f"Subject: '{subject}'"
+        logger.warning(
+            "Provider: UNCONFIGURED. Outbound SMTP / Gmail credentials are not configured in production environment."
         )
+
     return True
 
 

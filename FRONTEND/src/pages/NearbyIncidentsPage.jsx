@@ -9,13 +9,12 @@ import {
   ShieldCheck,
   AlertTriangle,
   Clock,
-  ExternalLink,
-  ChevronRight,
-  Filter,
   Search,
 } from 'lucide-react';
 import { fetchEvents } from '../services/api';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../config/eventConfig';
+import { formatDateTimeIST } from '../utils/dateTime';
+import { CitySelector } from '../components/common/CitySelector';
 
 function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
   if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
@@ -32,21 +31,10 @@ function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
   return Math.round(R * c);
 }
 
-const FALLBACK_CITIES = [
-  { name: 'Delhi NCR', lat: 28.6139, lng: 77.2090 },
-  { name: 'Mumbai, Maharashtra', lat: 19.0760, lng: 72.8777 },
-  { name: 'Kolkata, West Bengal', lat: 22.5726, lng: 88.3639 },
-  { name: 'Chennai, Tamil Nadu', lat: 13.0827, lng: 80.2707 },
-  { name: 'Bengaluru, Karnataka', lat: 12.9716, lng: 77.5946 },
-  { name: 'Guwahati, Assam', lat: 26.1445, lng: 91.7362 },
-  { name: 'Dehradun, Uttarakhand', lat: 30.3165, lng: 78.0322 },
-  { name: 'Shimla, Himachal Pradesh', lat: 31.1048, lng: 77.1734 },
-  { name: 'Bhubaneswar, Odisha', lat: 20.2961, lng: 85.8245 },
-  { name: 'Kochi, Kerala', lat: 9.9312, lng: 76.2673 },
-];
+const DEFAULT_CITY = { name: 'Delhi NCR, Delhi', lat: 28.6139, lng: 77.2090, isGps: false };
 
 export const NearbyIncidentsPage = ({ onNavigate }) => {
-  const [userLocation, setUserLocation] = useState(null);
+  const [userLocation, setUserLocation] = useState(DEFAULT_CITY);
   const [locationStatus, setLocationStatus] = useState('prompt');
   const [locationError, setLocationError] = useState(null);
 
@@ -59,8 +47,8 @@ export const NearbyIncidentsPage = ({ onNavigate }) => {
   const requestGeolocation = () => {
     if (!navigator.geolocation) {
       setLocationStatus('denied');
-      setLocationError('Geolocation not supported.');
-      setUserLocation(FALLBACK_CITIES[0]);
+      setLocationError('Geolocation not supported by your browser.');
+      setUserLocation(DEFAULT_CITY);
       return;
     }
 
@@ -82,8 +70,8 @@ export const NearbyIncidentsPage = ({ onNavigate }) => {
       (err) => {
         console.warn('[NearbyIncidentsPage] GPS error:', err.message);
         setLocationStatus('denied');
-        setLocationError('GPS permission not provided. Selected Delhi NCR by default.');
-        setUserLocation(FALLBACK_CITIES[0]);
+        setLocationError('GPS permission not provided. Select your city below.');
+        setUserLocation(DEFAULT_CITY);
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
     );
@@ -119,7 +107,11 @@ export const NearbyIncidentsPage = ({ onNavigate }) => {
       isGps: false,
     });
     setLocationStatus('manual');
-    setLocationError(null);
+    if (city.unresolved) {
+      setLocationError(`Coordinates for "${city.name}" not in offline index. Showing all regional incidents.`);
+    } else {
+      setLocationError(null);
+    }
   };
 
   const nearbyList = useMemo(() => {
@@ -224,32 +216,22 @@ export const NearbyIncidentsPage = ({ onNavigate }) => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={requestGeolocation}
-                className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                className="px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs shrink-0"
               >
                 <Compass className="w-3.5 h-3.5" />
                 <span>Use Current GPS</span>
               </button>
 
-              <select
-                onChange={(e) => {
-                  const c = FALLBACK_CITIES.find((city) => city.name === e.target.value);
-                  if (c) handleSelectCity(c);
-                }}
-                value={userLocation?.isGps ? '' : userLocation?.name || ''}
-                className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/30 cursor-pointer"
-              >
-                <option value="" disabled>
-                  Select City Focus
-                </option>
-                {FALLBACK_CITIES.map((c) => (
-                  <option key={c.name} value={c.name}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <div className="w-64">
+                <CitySelector
+                  value={userLocation}
+                  onSelectCity={handleSelectCity}
+                  placeholder="Search / Type city..."
+                />
+              </div>
             </div>
           </div>
 
@@ -344,6 +326,7 @@ export const NearbyIncidentsPage = ({ onNavigate }) => {
             {nearbyList.map((incident) => {
               const config = getCategoryConfig(incident.category);
               const sevConfig = SEVERITY_CONFIG[incident.severity] || SEVERITY_CONFIG.Moderate;
+              const istTimeString = formatDateTimeIST(incident);
 
               return (
                 <div
@@ -374,9 +357,9 @@ export const NearbyIncidentsPage = ({ onNavigate }) => {
                         </span>
                       )}
 
-                      <span className="inline-flex items-center gap-1 text-slate-400 font-mono text-[11px] ml-auto">
-                        <Clock className="w-3 h-3" />
-                        <span>{incident.date} {incident.time ? `• ${incident.time}` : ''}</span>
+                      <span className="inline-flex items-center gap-1 text-slate-500 font-medium text-xs ml-auto">
+                        <Clock className="w-3.5 h-3.5 text-orange-500" />
+                        <span>{istTimeString}</span>
                       </span>
                     </div>
 

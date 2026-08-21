@@ -222,6 +222,9 @@ export const AuthProvider = ({ children }) => {
   const verifyEmail = useCallback(async ({ email, otp }) => {
     setAuthError(null);
     const res = await authVerifyEmail({ email, otp });
+    if (res?.access_token) {
+      setAccessToken(res.access_token, res.refresh_token || null);
+    }
     if (res?.user) {
       setUser(res.user);
       setStoredUser(res.user);

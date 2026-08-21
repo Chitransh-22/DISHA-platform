@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { fetchNewsDetail } from '../services/api';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../config/eventConfig';
+import { formatDateTimeIST } from '../utils/dateTime';
+import { sanitizeNewsDescription } from '../utils/htmlSanitizer';
 
 export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
   const [article, setArticle] = useState(initialArticle || null);
@@ -31,7 +33,13 @@ export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
         try {
           const res = await fetchNewsDetail(newsId);
           if (res && res.news) {
-            setArticle(res.news);
+            setArticle({
+              ...res.news,
+              title: sanitizeNewsDescription(res.news.title),
+              summary: sanitizeNewsDescription(res.news.summary || res.news.description || ''),
+              description: sanitizeNewsDescription(res.news.description || res.news.summary || ''),
+              full_content: sanitizeNewsDescription(res.news.full_content || res.news.full_description || res.news.description || res.news.summary || ''),
+            });
           } else {
             setError('Article details could not be found.');
           }
@@ -51,6 +59,7 @@ export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
 
   const corroboratingSources = article?.corroboration?.sources || [];
   const confidenceScore = article?.metadata?.confidence ?? article?.classification?.confidence;
+  const istTimeString = article ? formatDateTimeIST(article) : '';
 
   return (
     <div className="min-h-screen bg-[#f5f2ea] text-slate-900 flex flex-col p-4 sm:p-6 lg:p-8 font-sans">
@@ -89,43 +98,31 @@ export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
                 <div key={n} className="h-14 bg-slate-100 rounded-xl" />
               ))}
             </div>
-            <div className="space-y-2 pt-4">
-              <div className="h-4 w-full bg-slate-100 rounded-lg" />
-              <div className="h-4 w-full bg-slate-100 rounded-lg" />
-              <div className="h-4 w-2/3 bg-slate-100 rounded-lg" />
-            </div>
           </div>
         )}
 
         {/* Error / Not Found State */}
-        {!loading && (error || !article) && (
-          <div className="bg-white rounded-3xl p-12 border border-slate-200/80 shadow-sm text-center space-y-4">
-            <div className="w-14 h-14 rounded-2xl bg-red-50 border border-red-200 flex items-center justify-center text-red-600 mx-auto">
-              <AlertTriangle className="w-7 h-7" />
-            </div>
-            <div className="space-y-1 max-w-md mx-auto">
-              <h2 className="text-xl font-bold text-slate-900">Article Not Found</h2>
-              <p className="text-sm text-slate-500 leading-relaxed">
-                {error || 'The requested disaster news briefing could not be loaded.'}
-              </p>
-            </div>
+        {!loading && error && (
+          <div className="bg-white rounded-3xl p-12 border border-slate-200 text-center space-y-4">
+            <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto" />
+            <h2 className="text-xl font-bold text-slate-900">Article Unavailable</h2>
+            <p className="text-sm text-slate-500 max-w-md mx-auto">{error}</p>
             <button
               onClick={() => onNavigate('news')}
-              className="px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white font-bold text-sm rounded-xl transition-colors cursor-pointer inline-flex items-center gap-2"
+              className="px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
             >
-              <ArrowLeft className="w-4 h-4" />
-              <span>Return to Recent News</span>
+              Return to Recent News
             </button>
           </div>
         )}
 
-        {/* Full Article Content */}
-        {!loading && article && (
+        {/* Article Content Display */}
+        {!loading && !error && article && (
           <article className="bg-white rounded-3xl p-6 sm:p-10 border border-slate-200/90 shadow-sm space-y-6">
             
-            {/* Header Badges & Meta */}
-            <div className="flex flex-wrap items-center gap-2.5 pb-2">
-              {/* Category */}
+            {/* Top Badges */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Hazard Category */}
               <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-bold text-xs border ${config.badge}`}>
                 <span>{config.icon}</span>
                 <span>{config.label}</span>
@@ -158,9 +155,9 @@ export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
 
             {/* Time & Author / Agency row */}
             <div className="flex flex-wrap items-center justify-between gap-4 py-3 border-y border-slate-100 text-xs sm:text-sm text-slate-500">
-              <div className="flex items-center gap-2 font-mono">
+              <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-orange-500" />
-                <span>Published: <strong className="text-slate-800">{article.date}</strong> {article.time && <span>at {article.time}</span>}</span>
+                <span>Published: <strong className="text-slate-800">{istTimeString}</strong></span>
               </div>
 
               <div className="flex items-center gap-2">
@@ -168,18 +165,6 @@ export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
                 <span>Source: <strong className="text-slate-800">{article.source || 'Verified Disaster Feed'}</strong></span>
               </div>
             </div>
-
-            {/* Hero Image if present */}
-            {article.image && (
-              <div className="w-full max-h-[380px] rounded-2xl overflow-hidden bg-slate-100 border border-slate-200">
-                <img
-                  src={article.image}
-                  alt={article.title}
-                  className="w-full h-full object-cover"
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-              </div>
-            )}
 
             {/* Key Field Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200/80">
@@ -312,11 +297,6 @@ export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
                   Direct official bulletin ingest
                 </div>
               )}
-
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600">
-                <Phone className="w-3.5 h-3.5 text-red-500" />
-                <span>National Emergency Helpline: <strong className="text-slate-900">112 / 1070</strong></span>
-              </div>
 
             </div>
 

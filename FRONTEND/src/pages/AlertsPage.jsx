@@ -12,13 +12,14 @@ import {
   CheckCircle,
   Navigation,
   Phone,
-  Flame,
   ShieldCheck,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
 import { fetchEvents } from '../services/api';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../config/eventConfig';
+import { formatDateTimeIST } from '../utils/dateTime';
+import { CitySelector } from '../components/common/CitySelector';
 
 // Haversine formula to compute great-circle distance between two GPS coordinates in kilometers
 function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
@@ -36,23 +37,11 @@ function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
   return Math.round(R * c);
 }
 
-// Major Indian cities for quick fallback selection
-const FALLBACK_CITIES = [
-  { name: 'Delhi NCR', lat: 28.6139, lng: 77.2090 },
-  { name: 'Mumbai, Maharashtra', lat: 19.0760, lng: 72.8777 },
-  { name: 'Kolkata, West Bengal', lat: 22.5726, lng: 88.3639 },
-  { name: 'Chennai, Tamil Nadu', lat: 13.0827, lng: 80.2707 },
-  { name: 'Bengaluru, Karnataka', lat: 12.9716, lng: 77.5946 },
-  { name: 'Guwahati, Assam', lat: 26.1445, lng: 91.7362 },
-  { name: 'Dehradun, Uttarakhand', lat: 30.3165, lng: 78.0322 },
-  { name: 'Shimla, Himachal Pradesh', lat: 31.1048, lng: 77.1734 },
-  { name: 'Bhubaneswar, Odisha', lat: 20.2961, lng: 85.8245 },
-  { name: 'Kochi, Kerala', lat: 9.9312, lng: 76.2673 },
-];
+const DEFAULT_CITY = { name: 'Delhi NCR, Delhi', lat: 28.6139, lng: 77.2090, isGps: false };
 
 export const AlertsPage = ({ onNavigate }) => {
   // User Location State
-  const [userLocation, setUserLocation] = useState(null); // { lat, lng, name, isGps }
+  const [userLocation, setUserLocation] = useState(DEFAULT_CITY);
   const [locationStatus, setLocationStatus] = useState('prompt'); // 'prompt', 'locating', 'granted', 'denied', 'manual'
   const [locationError, setLocationError] = useState(null);
 
@@ -62,17 +51,16 @@ export const AlertsPage = ({ onNavigate }) => {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [expandedAlertId, setExpandedAlertId] = useState(null);
 
-  // Events & Read State
+  // Events
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [readAlertIds, setReadAlertIds] = useState(new Set());
 
   // 1. Request Browser Geolocation
   const requestGeolocation = () => {
     if (!navigator.geolocation) {
       setLocationStatus('denied');
       setLocationError('Geolocation is not supported by your browser.');
-      setUserLocation(FALLBACK_CITIES[0]);
+      setUserLocation(DEFAULT_CITY);
       return;
     }
 
@@ -94,14 +82,13 @@ export const AlertsPage = ({ onNavigate }) => {
       (err) => {
         console.warn('[AlertsPage] Geolocation permission denied or unavailable:', err.message);
         setLocationStatus('denied');
-        setLocationError('Location permission denied. Showing regional alerts (Default: Delhi NCR).');
-        setUserLocation(FALLBACK_CITIES[0]);
+        setLocationError('Location permission denied. Select your city or region below.');
+        setUserLocation(DEFAULT_CITY);
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
     );
   };
 
-  // On initial mount, request geolocation
   useEffect(() => {
     requestGeolocation();
   }, []);
@@ -135,7 +122,7 @@ export const AlertsPage = ({ onNavigate }) => {
     loadAlerts();
   }, []);
 
-  // Handle Manual City Fallback
+  // Handle City Selection from Searchable CitySelector
   const handleSelectCity = (city) => {
     setUserLocation({
       lat: city.lat,
@@ -144,7 +131,11 @@ export const AlertsPage = ({ onNavigate }) => {
       isGps: false,
     });
     setLocationStatus('manual');
-    setLocationError(null);
+    if (city.unresolved) {
+      setLocationError(`Coordinates for "${city.name}" not found in offline index. Showing all regional alerts.`);
+    } else {
+      setLocationError(null);
+    }
   };
 
   // Compute distances & filter alerts
@@ -163,7 +154,6 @@ export const AlertsPage = ({ onNavigate }) => {
         return {
           ...ev,
           distanceKm,
-          isRead: readAlertIds.has(ev.id),
         };
       })
       .filter((ev) => {
@@ -184,19 +174,10 @@ export const AlertsPage = ({ onNavigate }) => {
         }
         return (b.timestamp || 0) - (a.timestamp || 0);
       });
-  }, [events, userLocation, maxRadiusKm, selectedSeverity, selectedCategory, readAlertIds]);
+  }, [events, userLocation, maxRadiusKm, selectedSeverity, selectedCategory]);
 
   const toggleExpand = (alertId) => {
     setExpandedAlertId(expandedAlertId === alertId ? null : alertId);
-    // Mark as read
-    if (!readAlertIds.has(alertId)) {
-      setReadAlertIds((prev) => new Set([...prev, alertId]));
-    }
-  };
-
-  const markAllAsRead = () => {
-    const allIds = processedAlerts.map((a) => a.id);
-    setReadAlertIds(new Set(allIds));
   };
 
   return (
@@ -239,15 +220,6 @@ export const AlertsPage = ({ onNavigate }) => {
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-orange-600' : ''}`} />
               <span>Refresh Alerts</span>
             </button>
-
-            {processedAlerts.length > 0 && (
-              <button
-                onClick={markAllAsRead}
-                className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
-              >
-                Mark All Read
-              </button>
-            )}
           </div>
         </div>
 
@@ -275,33 +247,23 @@ export const AlertsPage = ({ onNavigate }) => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={requestGeolocation}
-                className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                className="px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs shrink-0"
               >
                 <Compass className="w-3.5 h-3.5" />
                 <span>Use My GPS</span>
               </button>
 
-              {/* Manual City Selector */}
-              <select
-                onChange={(e) => {
-                  const c = FALLBACK_CITIES.find((city) => city.name === e.target.value);
-                  if (c) handleSelectCity(c);
-                }}
-                value={userLocation?.isGps ? '' : userLocation?.name || ''}
-                className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/30 cursor-pointer"
-              >
-                <option value="" disabled>
-                  Select City / Region
-                </option>
-                {FALLBACK_CITIES.map((c) => (
-                  <option key={c.name} value={c.name}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              {/* Searchable / Typeable City Selector */}
+              <div className="w-64">
+                <CitySelector
+                  value={userLocation}
+                  onSelectCity={handleSelectCity}
+                  placeholder="Search / Type city..."
+                />
+              </div>
             </div>
           </div>
 
@@ -410,13 +372,12 @@ export const AlertsPage = ({ onNavigate }) => {
               const config = getCategoryConfig(alert.category);
               const sevConfig = SEVERITY_CONFIG[alert.severity] || SEVERITY_CONFIG.Moderate;
               const isExpanded = expandedAlertId === alert.id;
+              const istTimeString = formatDateTimeIST(alert);
 
               return (
                 <div
                   key={alert.id}
-                  className={`bg-white rounded-2xl border transition-all duration-200 shadow-xs overflow-hidden ${
-                    alert.isRead ? 'border-slate-200/80 opacity-90' : 'border-orange-500/50 shadow-md ring-1 ring-orange-500/20'
-                  }`}
+                  className="bg-white rounded-2xl border border-slate-200/90 hover:border-orange-400 transition-all duration-200 shadow-xs overflow-hidden"
                 >
                   {/* Alert Header Summary */}
                   <div
@@ -452,15 +413,10 @@ export const AlertsPage = ({ onNavigate }) => {
                           </span>
                         )}
 
-                        {/* Read/Unread Indicator */}
-                        {!alert.isRead && (
-                          <span className="w-2 h-2 rounded-full bg-orange-600 animate-ping" />
-                        )}
-
-                        {/* Time */}
-                        <span className="inline-flex items-center gap-1 text-slate-400 font-mono text-[11px] ml-auto">
-                          <Clock className="w-3 h-3" />
-                          <span>{alert.date} {alert.time ? `• ${alert.time}` : ''}</span>
+                        {/* IST Time */}
+                        <span className="inline-flex items-center gap-1 text-slate-500 font-medium text-xs ml-auto">
+                          <Clock className="w-3.5 h-3.5 text-orange-500" />
+                          <span>{istTimeString}</span>
                         </span>
                       </div>
 
@@ -537,22 +493,6 @@ export const AlertsPage = ({ onNavigate }) => {
                           )}
                         </div>
                       )}
-
-                      {/* Emergency Helpline Bar */}
-                      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-red-50/80 border border-red-200 rounded-xl text-xs">
-                        <div className="flex items-center gap-2">
-                          <Phone className="w-4 h-4 text-red-600" />
-                          <span className="font-bold text-red-950">
-                            National Disaster Emergency Helpline: 112 / 1070
-                          </span>
-                        </div>
-                        <a
-                          href="tel:112"
-                          className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition-colors cursor-pointer"
-                        >
-                          Call 112
-                        </a>
-                      </div>
 
                     </div>
                   )}

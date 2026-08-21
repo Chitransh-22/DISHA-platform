@@ -472,15 +472,26 @@ async def register(req: RegisterRequest):
         )
     ],
 )
-async def verify_email(req: VerifyEmailRequest):
+async def verify_email(
+    req: VerifyEmailRequest,
+    request: Request,
+    response: Response,
+):
     """
-    Verifies user's email address using the supplied 6-digit OTP.
+    Verifies user's email address using the supplied 6-digit OTP and authenticates the user.
     """
+    ip = get_client_ip(request)
+    user_agent = get_user_agent(request)
 
     result = await _auth_service.verify_email(
         email=req.email,
         otp=req.otp,
+        ip=ip,
+        user_agent=user_agent,
     )
+
+    if isinstance(result, dict) and "refresh_token" in result:
+        set_refresh_cookie(response, result["refresh_token"])
 
     return result
 

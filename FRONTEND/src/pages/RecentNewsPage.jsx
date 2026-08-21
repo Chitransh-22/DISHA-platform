@@ -4,19 +4,21 @@ import {
   Newspaper,
   Clock,
   MapPin,
+  ExternalLink,
+  ChevronRight,
   Filter,
   Search,
-  ExternalLink,
-  ShieldCheck,
-  ChevronRight,
   RefreshCw,
+  Building2,
+  Calendar,
   AlertTriangle,
   Flame,
-  Radio,
-  Building2,
+  ShieldCheck,
 } from 'lucide-react';
 import { fetchRecentNews, fetchNewsSources } from '../services/api';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../config/eventConfig';
+import { formatDateTimeIST } from '../utils/dateTime';
+import { sanitizeNewsDescription } from '../utils/htmlSanitizer';
 
 export const RecentNewsPage = ({ onNavigate, onSelectNews }) => {
   const [timeRange, setTimeRange] = useState('24h');
@@ -56,8 +58,15 @@ export const RecentNewsPage = ({ onNavigate, onSelectNews }) => {
         limit: 50,
       });
       if (data && Array.isArray(data.news)) {
-        setNewsList(data.news);
-        setTotalCount(data.total || data.news.length);
+        // Sanitize every article summary and description
+        const sanitized = data.news.map((item) => ({
+          ...item,
+          title: sanitizeNewsDescription(item.title),
+          summary: sanitizeNewsDescription(item.summary || item.description || ''),
+          description: sanitizeNewsDescription(item.description || item.summary || ''),
+        }));
+        setNewsList(sanitized);
+        setTotalCount(data.total || sanitized.length);
       } else {
         setNewsList([]);
         setTotalCount(0);
@@ -140,62 +149,46 @@ export const RecentNewsPage = ({ onNavigate, onSelectNews }) => {
                   Recent Disaster News
                 </h1>
                 <p className="text-xs text-slate-500 font-medium">
-                  Verified disaster intelligence reports aggregated from multi-source feeds
+                  Verified disaster intelligence briefings aggregated across national media & government wires
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => loadNews(timeRange, selectedCategory, selectedSource)}
-              disabled={loading}
-              className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-orange-600' : ''}`} />
-              <span>Refresh Feed</span>
-            </button>
-
-            <div className="flex items-center gap-2 bg-white border border-slate-200 px-3.5 py-2 rounded-xl shadow-xs">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-              </span>
-              <span className="text-xs font-bold text-slate-700">
-                {filteredArticles.length} Stories
-              </span>
-            </div>
-          </div>
+          <button
+            onClick={() => loadNews(timeRange, selectedCategory, selectedSource)}
+            disabled={loading}
+            className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-orange-600' : ''}`} />
+            <span>Refresh Feed</span>
+          </button>
         </div>
 
-        {/* Filter Controls Bar */}
+        {/* Filter Controls Panel */}
         <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-xs space-y-4">
           
-          <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             
-            {/* 1. Time Range Filter (24 Hours [default], 7 Days, 15 Days, 30 Days) */}
-            <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-2 pr-1 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-orange-500" />
-                <span>Period:</span>
-              </span>
+            {/* 1. Time Window Pills */}
+            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
               {[
-                { id: '24h', label: '24 Hours' },
-                { id: '7d', label: '7 Days' },
-                { id: '15d', label: '15 Days' },
-                { id: '30d', label: '30 Days' },
-              ].map((t) => (
+                { label: '24 Hours', value: '24h' },
+                { label: '7 Days', value: '7d' },
+                { label: '15 Days', value: '15d' },
+                { label: '30 Days', value: '30d' },
+              ].map((pill) => (
                 <button
-                  key={t.id}
-                  onClick={() => handleTimeRangeChange(t.id)}
+                  key={pill.value}
+                  onClick={() => handleTimeRangeChange(pill.value)}
                   disabled={loading}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer disabled:opacity-50 ${
-                    timeRange === t.id
+                    timeRange === pill.value
                       ? 'bg-orange-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
                   }`}
                 >
-                  {t.label}
+                  {pill.label}
                 </button>
               ))}
             </div>
@@ -278,14 +271,12 @@ export const RecentNewsPage = ({ onNavigate, onSelectNews }) => {
               <div key={n} className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs animate-pulse flex gap-5">
                 <div className="flex-1 space-y-3">
                   <div className="flex gap-2">
-                    <div className="h-5 w-20 bg-slate-200 rounded-full" />
                     <div className="h-5 w-24 bg-slate-200 rounded-full" />
+                    <div className="h-5 w-20 bg-slate-200 rounded-full" />
                   </div>
                   <div className="h-6 w-3/4 bg-slate-200 rounded-lg" />
                   <div className="h-4 w-full bg-slate-100 rounded-lg" />
-                  <div className="h-4 w-2/3 bg-slate-100 rounded-lg" />
                 </div>
-                <div className="w-24 h-24 bg-slate-200 rounded-xl hidden sm:block shrink-0" />
               </div>
             ))}
           </div>
@@ -343,6 +334,7 @@ export const RecentNewsPage = ({ onNavigate, onSelectNews }) => {
             {filteredArticles.map((article, idx) => {
               const config = getCategoryConfig(article.category);
               const sevConfig = SEVERITY_CONFIG[article.severity] || SEVERITY_CONFIG.Moderate;
+              const istTimeString = formatDateTimeIST(article);
 
               return (
                 <div
@@ -373,11 +365,10 @@ export const RecentNewsPage = ({ onNavigate, onSelectNews }) => {
                         </span>
                       )}
 
-                      {/* Accurate UTC Date & Time */}
-                      <span className="inline-flex items-center gap-1 text-slate-400 font-medium ml-auto sm:ml-0 font-mono text-[11px]">
-                        <Clock className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{article.date}</span>
-                        {article.time && <span className="text-slate-500 font-bold">• {article.time}</span>}
+                      {/* IST Date & Time */}
+                      <span className="inline-flex items-center gap-1 text-slate-500 font-medium ml-auto sm:ml-0 text-xs">
+                        <Clock className="w-3.5 h-3.5 text-orange-500" />
+                        <span>{istTimeString}</span>
                       </span>
                     </div>
 
@@ -407,18 +398,6 @@ export const RecentNewsPage = ({ onNavigate, onSelectNews }) => {
                     </div>
 
                   </div>
-
-                  {/* Thumbnail Image if available */}
-                  {article.image && (
-                    <div className="w-full sm:w-32 h-28 sm:h-28 rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
-                      <img
-                        src={article.image}
-                        alt={article.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        onError={(e) => { e.target.style.display = 'none'; }}
-                      />
-                    </div>
-                  )}
 
                 </div>
               );
