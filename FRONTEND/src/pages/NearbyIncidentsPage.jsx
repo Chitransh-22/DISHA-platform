@@ -10,10 +10,12 @@ import {
   AlertTriangle,
   Clock,
   Search,
+  ExternalLink,
 } from 'lucide-react';
 import { fetchEvents } from '../services/api';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../config/eventConfig';
 import { formatDateTimeIST } from '../utils/dateTime';
+import { normalizeEvent } from '../utils/eventNormalizer';
 import { CitySelector } from '../components/common/CitySelector';
 
 function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
@@ -86,7 +88,8 @@ export const NearbyIncidentsPage = ({ onNavigate }) => {
     try {
       const data = await fetchEvents({ range: '30d' });
       if (data && Array.isArray(data.events)) {
-        setEvents(data.events);
+        const normalized = data.events.map((ev) => normalizeEvent(ev)).filter(Boolean);
+        setEvents(normalized);
       }
     } catch (err) {
       console.error('[NearbyIncidentsPage] Error:', err);
@@ -380,6 +383,20 @@ export const NearbyIncidentsPage = ({ onNavigate }) => {
                       </span>
                       <span>•</span>
                       <span>Source: <strong className="text-slate-700">{incident.source_label || incident.source}</strong></span>
+                      {incident.source_url && (
+                        <>
+                          <span>•</span>
+                          <a
+                            href={incident.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-orange-600 hover:text-orange-700 font-bold inline-flex items-center gap-1 hover:underline cursor-pointer"
+                          >
+                            <span>Read Source</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -388,7 +405,7 @@ export const NearbyIncidentsPage = ({ onNavigate }) => {
                     <a
                       href={`https://www.google.com/maps/dir/?api=1&destination=${incident.latitude},${incident.longitude}`}
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noopener noreferrer"
                       className="px-4 py-2 bg-slate-900 hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-colors shrink-0 flex items-center gap-1.5 shadow-xs cursor-pointer"
                     >
                       <Navigation className="w-3.5 h-3.5" />

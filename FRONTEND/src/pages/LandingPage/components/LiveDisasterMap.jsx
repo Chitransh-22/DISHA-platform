@@ -22,11 +22,16 @@ import {
   Radio,
   Check,
   TrendingDown,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  FileText,
 } from 'lucide-react';
 import { fetchEvents, fetchNearbyEmergencyServices } from '../../../services/api';
 import { IncidentDetailModal } from './IncidentDetailModal';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../../../config/eventConfig';
 import { formatDateTimeIST } from '../../../utils/dateTime';
+import { normalizeEvent } from '../../../utils/eventNormalizer';
 
 export const LiveDisasterMap = () => {
   const mapContainerRef = useRef(null);
@@ -52,6 +57,7 @@ export const LiveDisasterMap = () => {
 
   // Selected Event & Nearby Services State
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [isDescExpanded, setIsDescExpanded] = useState(false);
   const [nearbyServicesData, setNearbyServicesData] = useState(null);
   const [loadingNearbyServices, setLoadingNearbyServices] = useState(false);
   const [nearbyServicesError, setNearbyServicesError] = useState(null);
@@ -75,19 +81,21 @@ export const LiveDisasterMap = () => {
     try {
       const data = await fetchEvents({ range: targetRange });
       if (data && Array.isArray(data.events)) {
-        // Filter strictly to events with valid numeric coordinates
-        const validEvents = data.events.filter(
-          (ev) =>
-            ev &&
-            typeof ev.latitude === 'number' &&
-            typeof ev.longitude === 'number' &&
-            !isNaN(ev.latitude) &&
-            !isNaN(ev.longitude) &&
-            ev.latitude >= -90 &&
-            ev.latitude <= 90 &&
-            ev.longitude >= -180 &&
-            ev.longitude <= 180
-        );
+        // Normalize each event object and filter strictly to valid numeric coordinates
+        const validEvents = data.events
+          .map((ev) => normalizeEvent(ev))
+          .filter(
+            (ev) =>
+              ev &&
+              typeof ev.latitude === 'number' &&
+              typeof ev.longitude === 'number' &&
+              !isNaN(ev.latitude) &&
+              !isNaN(ev.longitude) &&
+              ev.latitude >= -90 &&
+              ev.latitude <= 90 &&
+              ev.longitude >= -180 &&
+              ev.longitude <= 180
+          );
 
         setEvents(validEvents);
 
@@ -310,7 +318,9 @@ export const LiveDisasterMap = () => {
   const handleSelectEvent = async (event, radiusM = 5000) => {
     if (!event || typeof event.latitude !== 'number' || typeof event.longitude !== 'number') return;
 
-    setSelectedEvent(event);
+    const normalized = normalizeEvent(event);
+    setSelectedEvent(normalized);
+    setIsDescExpanded(false);
     setSelectedRadiusM(radiusM);
     setLoadingNearbyServices(true);
     setNearbyServicesError(null);
@@ -1025,69 +1035,117 @@ export const LiveDisasterMap = () => {
 
           {/* DOCKED NEARBY EMERGENCY SERVICES & SITUATION PANEL (Opens when an incident is selected) */}
           {selectedEvent && (() => {
-            const eventConfig = getCategoryConfig(selectedEvent.category || selectedEvent.disaster_type || selectedEvent.type);
+            const eventConfig = getCategoryConfig(selectedEvent.category || selectedEvent.raw_category);
+            const sevConfig = SEVERITY_CONFIG[selectedEvent.severity] || SEVERITY_CONFIG.Moderate;
+            const isDescriptionLong = (selectedEvent.description || '').length > 180;
+            const displayDescription = !isDescExpanded && isDescriptionLong
+              ? `${selectedEvent.description.slice(0, 180).trim()}...`
+              : selectedEvent.description;
+
             return (
-              <div className="w-full md:w-[380px] lg:w-[420px] h-[360px] md:h-full bg-white text-slate-900 border-t md:border-t-0 md:border-l border-slate-200 flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200 font-sans">
+              <div className="w-full md:w-[380px] lg:w-[420px] h-[480px] md:h-full bg-white text-slate-900 border-t md:border-t-0 md:border-l border-slate-200 flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200 font-sans">
                 
-                {/* Panel Header */}
-                <div className="p-4 bg-[#101318] text-white border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
+                {/* 1. Sidebar Header */}
+                <div className="p-4 sm:p-4.5 bg-[#101318] text-white border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                    {/* Badge Row */}
+                    <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
                       <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md border flex items-center gap-1 ${eventConfig.badge}`}>
                         <span>{eventConfig.icon}</span>
                         <span>{eventConfig.label}</span>
                       </span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                        selectedEvent.severity === 'Critical'
-                          ? 'bg-red-600 text-white'
-                          : selectedEvent.severity === 'Severe'
-                          ? 'bg-orange-500 text-white'
-                          : 'bg-amber-500 text-white'
-                      }`}>
-                        {selectedEvent.severity || 'Moderate'}
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${sevConfig.badge}`}>
+                        {selectedEvent.severity} Severity
                       </span>
                     </div>
 
-                    <h3 className="text-sm sm:text-base font-bold text-white mt-1 leading-snug truncate">
+                    {/* Event Title */}
+                    <h3 className="text-sm sm:text-base font-bold text-white leading-snug break-words">
                       {selectedEvent.title}
                     </h3>
-                    <p className="text-xs text-slate-300 mt-0.5 flex items-center gap-1 truncate">
-                      <MapPin className="w-3 h-3 text-orange-400 shrink-0" />
-                      <span>{selectedEvent.location || selectedEvent.state || 'Incident Area'}</span>
-                    </p>
-                    <div className="flex items-center gap-2 mt-1.5 text-[11px] text-slate-300">
-                      <span>🕒 {formatDateTimeIST(selectedEvent)}</span>
+
+                    {/* Location & Time Subtitle */}
+                    <div className="mt-1.5 space-y-1 text-xs text-slate-300">
+                      <p className="flex items-center gap-1.5 text-slate-300 leading-snug">
+                        <MapPin className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                        <span className="truncate">{selectedEvent.location || selectedEvent.state || 'Incident Area'}</span>
+                      </p>
+                      <p className="flex items-center gap-1.5 text-slate-400 text-[11px]">
+                        <Clock className="w-3 h-3 text-orange-400/80 shrink-0" />
+                        <span>{selectedEvent.formatted_time_ist || formatDateTimeIST(selectedEvent)}</span>
+                      </p>
                     </div>
                   </div>
 
+                  {/* Close Button */}
                   <button
                     onClick={handleDeselectEvent}
                     className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-                    title="Close Sidebar Panel"
-                    aria-label="Close"
+                    title="Close Event Details"
+                    aria-label="Close Event Details"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                {/* Situation Summary & Coordinates Info Bar */}
-                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs text-slate-600 space-y-1.5 shrink-0">
-                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
-                    <span>Source: <strong className="text-slate-800">{selectedEvent.source_label || selectedEvent.source}</strong></span>
-                    <span className="font-mono text-slate-700">
-                      {selectedEvent.latitude ? `${selectedEvent.latitude.toFixed(2)}°N, ${selectedEvent.longitude.toFixed(2)}°E` : ''}
+                {/* 2. Source / Description & Coordinates Card */}
+                <div className="p-3.5 bg-slate-50 border-b border-slate-200 text-xs space-y-2 shrink-0">
+                  
+                  {/* Source & Coordinates Row */}
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 gap-2">
+                    <span className="truncate">
+                      Source: <strong className="text-slate-800 font-semibold">{selectedEvent.source_label}</strong>
+                    </span>
+                    <span className="font-mono text-slate-600 shrink-0 text-[10.5px]">
+                      {selectedEvent.coordinates_formatted}
                     </span>
                   </div>
-                  {selectedEvent.description && (
-                    <p className="text-[11.5px] text-slate-700 leading-snug line-clamp-2 bg-white p-2 rounded-lg border border-slate-200/80">
-                      {selectedEvent.description}
-                    </p>
+
+                  {/* Sanitized Description Text (Never Raw HTML) */}
+                  {selectedEvent.description ? (
+                    <div className="bg-white p-2.5 rounded-xl border border-slate-200/90 space-y-1.5 shadow-2xs">
+                      <p className="text-[12px] text-slate-700 leading-relaxed break-words font-normal">
+                        {displayDescription}
+                      </p>
+                      
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 text-[11px]">
+                        {/* Expand / Collapse Button if text is long */}
+                        {isDescriptionLong ? (
+                          <button
+                            type="button"
+                            onClick={() => setIsDescExpanded((prev) => !prev)}
+                            className="text-orange-600 hover:text-orange-700 font-bold flex items-center gap-0.5 cursor-pointer"
+                          >
+                            <span>{isDescExpanded ? 'Show less' : 'Read more'}</span>
+                            {isDescExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          </button>
+                        ) : <div />}
+
+                        {/* Styled Source Link (Never raw HTML) */}
+                        {selectedEvent.source_url && (
+                          <a
+                            href={selectedEvent.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-orange-600 hover:text-orange-700 font-bold inline-flex items-center gap-1 hover:underline cursor-pointer"
+                            title="Open original reporting source"
+                          >
+                            <span>Read Full Source</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-white p-2 rounded-lg border border-slate-200/80 text-[11px] text-slate-400 italic">
+                      Automated disaster surveillance report.
+                    </div>
                   )}
                 </div>
 
-                {/* Radius Selector Bar */}
-                <div className="px-4 py-2 bg-slate-100/80 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0">
-                  <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Rescue Radius:</span>
+                {/* 3. Rescue Radius Selector Bar */}
+                <div className="px-3.5 py-2 bg-slate-100/90 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0">
+                  <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Rescue Radius:</span>
                   <div className="flex items-center gap-1.5">
                     {[5000, 15000, 25000].map((radiusM) => {
                       const radiusKm = radiusM / 1000;
@@ -1096,10 +1154,10 @@ export const LiveDisasterMap = () => {
                         <button
                           key={radiusM}
                           onClick={() => handleRadiusChange(radiusM)}
-                          className={`px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
+                          className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
                             isActive
                               ? 'bg-orange-600 text-white shadow-xs'
-                              : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                              : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50'
                           }`}
                         >
                           {radiusKm} km
@@ -1109,79 +1167,93 @@ export const LiveDisasterMap = () => {
                   </div>
                 </div>
 
-                {/* Service Categories Filter Tabs */}
-                <div className="px-4 py-2 bg-white border-b border-slate-200 flex items-center gap-1.5 shrink-0 overflow-x-auto scrollbar-none">
-                  <button
-                    onClick={() => setServiceFilterCategory('all')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
-                      serviceFilterCategory === 'all'
-                        ? 'bg-slate-900 text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    <span>All</span>
-                    <span className="text-[10px] px-1.5 py-0.2 bg-slate-800 text-white rounded-full">
-                      {nearbyServicesData?.counts?.total || 0}
-                    </span>
-                  </button>
+                {/* 4. Nearby Response Resources Filter Chips (Responsive & Clean Grid) */}
+                <div className="p-2.5 bg-white border-b border-slate-200 shrink-0">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {/* ALL */}
+                    <button
+                      onClick={() => setServiceFilterCategory('all')}
+                      className={`px-2 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center justify-between gap-1 border ${
+                        serviceFilterCategory === 'all'
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border-slate-200'
+                      }`}
+                    >
+                      <span className="truncate">ALL</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                        serviceFilterCategory === 'all' ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'
+                      }`}>
+                        {nearbyServicesData?.counts?.total || 0}
+                      </span>
+                    </button>
 
-                  <button
-                    onClick={() => setServiceFilterCategory('medical')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
-                      serviceFilterCategory === 'medical'
-                        ? 'bg-cyan-600 text-white'
-                        : 'bg-cyan-50 text-cyan-800 hover:bg-cyan-100 border border-cyan-200'
-                    }`}
-                  >
-                    <span>🏥 Hospitals</span>
-                    <span className="text-[10px] px-1.5 py-0.2 bg-cyan-700 text-white rounded-full">
-                      {nearbyServicesData?.counts?.medical || 0}
-                    </span>
-                  </button>
+                    {/* Hospitals */}
+                    <button
+                      onClick={() => setServiceFilterCategory('medical')}
+                      className={`px-2 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center justify-between gap-1 border ${
+                        serviceFilterCategory === 'medical'
+                          ? 'bg-cyan-600 text-white border-cyan-600'
+                          : 'bg-cyan-50/70 text-cyan-900 hover:bg-cyan-100 border-cyan-200'
+                      }`}
+                    >
+                      <span className="truncate">🏥 Hospitals</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                        serviceFilterCategory === 'medical' ? 'bg-cyan-700 text-white' : 'bg-cyan-200 text-cyan-900'
+                      }`}>
+                        {nearbyServicesData?.counts?.medical || 0}
+                      </span>
+                    </button>
 
-                  <button
-                    onClick={() => setServiceFilterCategory('police')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
-                      serviceFilterCategory === 'police'
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-indigo-50 text-indigo-800 hover:bg-indigo-100 border border-indigo-200'
-                    }`}
-                  >
-                    <span>🚔 Police</span>
-                    <span className="text-[10px] px-1.5 py-0.2 bg-indigo-700 text-white rounded-full">
-                      {nearbyServicesData?.counts?.police || 0}
-                    </span>
-                  </button>
+                    {/* Police */}
+                    <button
+                      onClick={() => setServiceFilterCategory('police')}
+                      className={`px-2 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center justify-between gap-1 border ${
+                        serviceFilterCategory === 'police'
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-indigo-50/70 text-indigo-900 hover:bg-indigo-100 border-indigo-200'
+                      }`}
+                    >
+                      <span className="truncate">🚔 Police</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                        serviceFilterCategory === 'police' ? 'bg-indigo-700 text-white' : 'bg-indigo-200 text-indigo-900'
+                      }`}>
+                        {nearbyServicesData?.counts?.police || 0}
+                      </span>
+                    </button>
 
-                  <button
-                    onClick={() => setServiceFilterCategory('fire')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 ${
-                      serviceFilterCategory === 'fire'
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
-                    }`}
-                  >
-                    <span>🚒 Fire Rescue</span>
-                    <span className="text-[10px] px-1.5 py-0.2 bg-amber-700 text-white rounded-full">
-                      {nearbyServicesData?.counts?.fire || 0}
-                    </span>
-                  </button>
+                    {/* Fire */}
+                    <button
+                      onClick={() => setServiceFilterCategory('fire')}
+                      className={`px-2 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center justify-between gap-1 border ${
+                        serviceFilterCategory === 'fire'
+                          ? 'bg-amber-600 text-white border-amber-600'
+                          : 'bg-amber-50/70 text-amber-900 hover:bg-amber-100 border-amber-200'
+                      }`}
+                    >
+                      <span className="truncate">🚒 Fire</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                        serviceFilterCategory === 'fire' ? 'bg-amber-700 text-white' : 'bg-amber-200 text-amber-900'
+                      }`}>
+                        {nearbyServicesData?.counts?.fire || 0}
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Scrollable Discovered Rescue Facility Cards List */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
+                {/* 5. Scrollable Discovered Rescue Facility Cards List */}
+                <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5 bg-slate-50/50">
                   {loadingNearbyServices && (
-                    <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-2.5">
-                      <RefreshCw className="w-7 h-7 animate-spin text-orange-600" />
+                    <div className="flex flex-col items-center justify-center py-10 text-center text-slate-500 space-y-2">
+                      <RefreshCw className="w-6 h-6 animate-spin text-orange-600" />
                       <div>
-                        <p className="text-sm font-bold text-slate-800">Locating response facilities...</p>
-                        <p className="text-xs text-slate-500">Querying hospital, police, and fire rescue index</p>
+                        <p className="text-xs font-bold text-slate-800">Locating response facilities...</p>
+                        <p className="text-[11px] text-slate-500">Querying hospital, police, and fire rescue index</p>
                       </div>
                     </div>
                   )}
 
                   {nearbyServicesError && !loadingNearbyServices && (
-                    <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center space-y-2">
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 text-center space-y-2">
                       <AlertTriangle className="w-5 h-5 text-red-500 mx-auto" />
                       <p className="text-xs font-bold text-red-700">{nearbyServicesError}</p>
                       <button
@@ -1194,10 +1266,10 @@ export const LiveDisasterMap = () => {
                   )}
 
                   {!loadingNearbyServices && !nearbyServicesError && panelServiceList.length === 0 && (
-                    <div className="text-center py-10 text-slate-400 space-y-2">
-                      <Shield className="w-8 h-8 text-slate-400 mx-auto" />
-                      <p className="text-sm font-semibold text-slate-700">No facilities found within {selectedRadiusM / 1000} km</p>
-                      <p className="text-xs text-slate-500">
+                    <div className="text-center py-8 text-slate-400 space-y-1.5">
+                      <Shield className="w-7 h-7 text-slate-400 mx-auto" />
+                      <p className="text-xs font-bold text-slate-700">No facilities found within {selectedRadiusM / 1000} km</p>
+                      <p className="text-[11px] text-slate-500">
                         Try expanding the radius to 15 km or 25 km above.
                       </p>
                     </div>
@@ -1220,17 +1292,17 @@ export const LiveDisasterMap = () => {
                       return (
                         <div
                           key={svc.id}
-                          className="bg-white hover:border-orange-400 border border-slate-200 rounded-xl p-3.5 transition-all duration-150 space-y-2.5 shadow-xs"
+                          className="bg-white hover:border-orange-400 border border-slate-200 rounded-xl p-3 transition-all duration-150 space-y-2 shadow-2xs"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <div>
+                            <div className="min-w-0">
                               <div className="flex items-center gap-1.5 mb-1">
                                 <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border flex items-center gap-1 ${badgeBg}`}>
                                   {categoryIcon}
                                   <span>{svc.category_label || svc.category}</span>
                                 </span>
                               </div>
-                              <h4 className="text-sm font-bold text-slate-900 leading-snug">{svc.name}</h4>
+                              <h4 className="text-xs sm:text-sm font-bold text-slate-900 leading-snug break-words">{svc.name}</h4>
                             </div>
 
                             <div className="text-right shrink-0">
@@ -1256,11 +1328,11 @@ export const LiveDisasterMap = () => {
                                 `https://www.google.com/maps/dir/?api=1&origin=${selectedEvent.latitude},${selectedEvent.longitude}&destination=${svc.latitude},${svc.longitude}`
                               }
                               target="_blank"
-                              rel="noreferrer"
-                              className="w-full bg-slate-900 hover:bg-orange-600 text-white font-bold text-xs py-2 px-3 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                              rel="noopener noreferrer"
+                              className="w-full bg-slate-900 hover:bg-orange-600 text-white font-bold text-xs py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
                             >
                               <Navigation className="w-3.5 h-3.5" />
-                              <span>Get Google Maps Directions ↗</span>
+                              <span>Get Directions ↗</span>
                             </a>
                           </div>
                         </div>
@@ -1268,20 +1340,21 @@ export const LiveDisasterMap = () => {
                     })}
                 </div>
 
-                {/* Panel Footer */}
+                {/* 6. Panel Footer Actions */}
                 <div className="p-3 bg-white border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
                   <button
                     onClick={() => setModalIncident(selectedEvent)}
-                    className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1 transition-colors cursor-pointer"
+                    className="flex-1 bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold text-xs py-2 px-3 rounded-xl border border-orange-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
                   >
-                    <span>Full Incident Briefing</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
+                    <FileText className="w-3.5 h-3.5 text-orange-600" />
+                    <span>Full Situation Brief</span>
+                    <ChevronRight className="w-3.5 h-3.5 text-orange-600" />
                   </button>
                   <button
                     onClick={handleDeselectEvent}
-                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-2.5 py-2 transition-colors cursor-pointer"
                   >
-                    Close Panel
+                    Close
                   </button>
                 </div>
 
@@ -1370,14 +1443,16 @@ export const LiveDisasterMap = () => {
       </div>
 
       {/* Situation Briefing Modal */}
-      <IncidentDetailModal
-        incident={modalIncident}
-        onClose={() => setModalIncident(null)}
-        onFindNearbyServices={(inc) => {
-          setModalIncident(null);
-          handleSelectEvent(inc, selectedRadiusM);
-        }}
-      />
+      {modalIncident && (
+        <IncidentDetailModal
+          incident={modalIncident}
+          onClose={() => setModalIncident(null)}
+          onFindNearbyServices={(inc) => {
+            setModalIncident(null);
+            handleSelectEvent(inc, selectedRadiusM);
+          }}
+        />
+      )}
 
     </section>
   );
