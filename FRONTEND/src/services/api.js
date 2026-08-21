@@ -415,22 +415,80 @@ export const fetchNearbyEmergencyServices = async (
 // ─── Authentication State & API Client Layer ────────────────────────────────
 
 let _inMemoryAccessToken = null;
+let _inMemoryRefreshToken = null;
 let _refreshPromise = null;
 
-export const setAccessToken = (token) => {
-  _inMemoryAccessToken = token;
+export const setAccessToken = (token, refreshToken = undefined) => {
+  _inMemoryAccessToken = token || null;
   if (token) {
     try {
+      localStorage.setItem('disha_access_token', token);
       localStorage.setItem('disha_has_session', 'true');
     } catch (e) {}
   } else {
     try {
+      localStorage.removeItem('disha_access_token');
       localStorage.removeItem('disha_has_session');
+      localStorage.removeItem('disha_user');
     } catch (e) {}
+  }
+
+  if (refreshToken !== undefined) {
+    _inMemoryRefreshToken = refreshToken || null;
+    if (refreshToken) {
+      try {
+        localStorage.setItem('disha_refresh_token', refreshToken);
+      } catch (e) {}
+    } else {
+      try {
+        localStorage.removeItem('disha_refresh_token');
+      } catch (e) {}
+    }
   }
 };
 
-export const getAccessToken = () => _inMemoryAccessToken;
+export const getAccessToken = () => {
+  if (_inMemoryAccessToken) return _inMemoryAccessToken;
+  try {
+    const saved = localStorage.getItem('disha_access_token');
+    if (saved) {
+      _inMemoryAccessToken = saved;
+      return saved;
+    }
+  } catch (e) {}
+  return null;
+};
+
+export const getRefreshToken = () => {
+  if (_inMemoryRefreshToken) return _inMemoryRefreshToken;
+  try {
+    const saved = localStorage.getItem('disha_refresh_token');
+    if (saved) {
+      _inMemoryRefreshToken = saved;
+      return saved;
+    }
+  } catch (e) {}
+  return null;
+};
+
+export const getStoredUser = () => {
+  try {
+    const u = localStorage.getItem('disha_user');
+    return u ? JSON.parse(u) : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+export const setStoredUser = (user) => {
+  try {
+    if (user) {
+      localStorage.setItem('disha_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('disha_user');
+    }
+  } catch (e) {}
+};
 
 export const getAuthHeaders = (extraHeaders = {}) => {
   const headers = {
@@ -438,8 +496,9 @@ export const getAuthHeaders = (extraHeaders = {}) => {
     'Content-Type': 'application/json',
     ...extraHeaders,
   };
-  if (_inMemoryAccessToken) {
-    headers['Authorization'] = `Bearer ${_inMemoryAccessToken}`;
+  const token = getAccessToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
   return headers;
 };
@@ -449,6 +508,9 @@ export const getAuthHeaders = (extraHeaders = {}) => {
  */
 export const authGoogleLoginUrl = () => {
   const baseUrl = getApiBaseUrl();
+  if (!baseUrl && !IS_PROD) {
+    return 'http://127.0.0.1:8000/api/auth/google/login';
+  }
   return `${baseUrl}/api/auth/google/login`;
 };
 
@@ -487,7 +549,7 @@ export const authenticatedFetch = async (url, options = {}) => {
   let response = await fetch(finalUrl, fetchOptions);
 
   // If 401 Unauthorized, perform single in-flight token refresh and retry once
-  if (response.status === 401 && localStorage.getItem('disha_has_session') === 'true') {
+  if (response.status === 401 && (localStorage.getItem('disha_has_session') === 'true' || getRefreshToken())) {
     if (!_refreshPromise) {
       _refreshPromise = authRefreshToken()
         .then((data) => {
@@ -496,7 +558,8 @@ export const authenticatedFetch = async (url, options = {}) => {
         })
         .catch((err) => {
           _refreshPromise = null;
-          setAccessToken(null);
+          setAccessToken(null, null);
+          setStoredUser(null);
           throw err;
         });
     }
@@ -511,7 +574,8 @@ export const authenticatedFetch = async (url, options = {}) => {
       });
     } catch (refreshErr) {
       // Refresh failed; propagate original 401
-      setAccessToken(null);
+      setAccessToken(null, null);
+      setStoredUser(null);
     }
   }
 
@@ -593,30 +657,40 @@ export const authLogin = async ({ email, password }) => {
   }
 
   if (data.access_token) {
-    setAccessToken(data.access_token);
+    setAccessToken(data.access_token, data.refresh_token);
+  }
+  if (data.user) {
+    setStoredUser(data.user);
   }
   return data;
 };
 
 /**
- * Refresh access token using the HTTP-Only cookie.
+ * Refresh access token using the HTTP-Only cookie or x-refresh-token fallback header.
  */
 export const authRefreshToken = async () => {
   const baseUrl = getApiBaseUrl();
+  const headers = { 'Accept': 'application/json' };
+  const rToken = getRefreshToken();
+  if (rToken) {
+    headers['x-refresh-token'] = rToken;
+  }
+
   const response = await fetch(`${baseUrl}/api/auth/refresh-token`, {
     method: 'POST',
-    headers: { 'Accept': 'application/json' },
+    headers,
     credentials: 'include',
   });
 
   if (!response.ok) {
-    setAccessToken(null);
+    setAccessToken(null, null);
+    setStoredUser(null);
     throw new Error('Session expired or invalid refresh token.');
   }
 
   const data = await response.json();
   if (data.access_token) {
-    setAccessToken(data.access_token);
+    setAccessToken(data.access_token, data.refresh_token || rToken);
   }
   return data;
 };
@@ -634,6 +708,10 @@ export const authGetMe = async () => {
     throw new Error(parseErrorMessage(data, response.status));
   }
 
+  if (data.user) {
+    setStoredUser(data.user);
+  }
+
   return data;
 };
 
@@ -642,16 +720,22 @@ export const authGetMe = async () => {
  */
 export const authLogout = async () => {
   const baseUrl = getApiBaseUrl();
+  const rToken = getRefreshToken();
+  const headers = getAuthHeaders();
+  if (rToken) {
+    headers['x-refresh-token'] = rToken;
+  }
   try {
     await fetch(`${baseUrl}/api/auth/logout`, {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers,
       credentials: 'include',
     });
   } catch (e) {
     console.warn('[DISHA Auth] Logout notice:', e);
   } finally {
-    setAccessToken(null);
+    setAccessToken(null, null);
+    setStoredUser(null);
   }
   return { success: true };
 };
@@ -661,16 +745,22 @@ export const authLogout = async () => {
  */
 export const authLogoutAll = async () => {
   const baseUrl = getApiBaseUrl();
+  const rToken = getRefreshToken();
+  const headers = getAuthHeaders();
+  if (rToken) {
+    headers['x-refresh-token'] = rToken;
+  }
   try {
     await fetch(`${baseUrl}/api/auth/logout-all`, {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers,
       credentials: 'include',
     });
   } catch (e) {
     console.warn('[DISHA Auth] Logout-all notice:', e);
   } finally {
-    setAccessToken(null);
+    setAccessToken(null, null);
+    setStoredUser(null);
   }
   return { success: true };
 };

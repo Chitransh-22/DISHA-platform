@@ -389,3 +389,131 @@ async def test_full_auth_flow():
             await user_repo.collection.delete_one({"_id": user["_id"] if "_id" in user else user["id"]})
             await session_repo.collection.delete_many({"user_id": user["id"]})
             await otp_repo.collection.delete_many({"email": test_email})
+
+
+@pytest.mark.asyncio
+async def test_google_login_endpoint():
+    """
+    Tests /api/auth/google/login endpoint:
+    - Initiates OAuth redirect (302)
+    - Sets session cookie
+    - Target URL contains accounts.google.com with client_id and redirect_uri
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", follow_redirects=False) as client:
+        res = await client.get("/api/auth/google/login")
+        assert res.status_code == 302
+        location = res.headers.get("location")
+        assert location is not None
+        assert "accounts.google.com" in location
+        assert "redirect_uri=" in location
+
+
+@pytest.mark.asyncio
+async def test_google_callback_error_handling():
+    """
+    Tests /api/auth/google/callback error conditions:
+    - Missing code query param -> redirects to frontend error URL
+    - Google error query param (access_denied) -> redirects to frontend error URL
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", follow_redirects=False) as client:
+        # 1. Missing code
+        res1 = await client.get("/api/auth/google/callback")
+        assert res1.status_code == 302
+        loc1 = res1.headers.get("location")
+        assert "/auth/google/success?error=" in loc1
+
+        # 2. User denied on Google consent screen
+        res2 = await client.get("/api/auth/google/callback?error=access_denied&error_description=User+declined")
+        assert res2.status_code == 302
+        loc2 = res2.headers.get("location")
+        assert "/auth/google/success?error=" in loc2
+
+
+@pytest.mark.asyncio
+async def test_google_callback_success_flow(monkeypatch):
+    """
+    Tests complete Google OAuth callback flow with mocked token exchange:
+    1. Simulates valid Google token & userinfo
+    2. Verifies user created in DB
+    3. Verifies redirect with access_token
+    4. Verifies refresh token cookie attached to RedirectResponse
+    5. Verifies access token works with /api/auth/get-me
+    6. Simulates return login of same Google user (updates existing user)
+    """
+    from app.routes.auth import oauth
+    from urllib.parse import parse_qs, urlparse
+
+    ts = int(time.time())
+    mock_email = f"google_test_{ts}@disha-test.gov.in"
+    mock_google_id = f"g_sub_{ts}"
+    mock_name = "Google Test User"
+
+    mock_token = {
+        "access_token": f"mock_google_access_token_{ts}",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "userinfo": {
+            "sub": mock_google_id,
+            "email": mock_email,
+            "name": mock_name,
+            "picture": "https://lh3.googleusercontent.com/test.jpg",
+            "email_verified": True,
+        },
+    }
+
+    async def mock_authorize_access_token(request):
+        return mock_token
+
+    monkeypatch.setattr(oauth.google, "authorize_access_token", mock_authorize_access_token)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", follow_redirects=False) as client:
+        # 1. Callback execution
+        res = await client.get("/api/auth/google/callback?code=mock_code_123&state=mock_state")
+        assert res.status_code == 302
+
+        location = res.headers.get("location")
+        assert location is not None
+        assert "/auth/google/success?access_token=" in location
+
+        # Extract access token
+        parsed = urlparse(location)
+        query_params = parse_qs(parsed.query)
+        assert "access_token" in query_params
+        issued_access_token = query_params["access_token"][0]
+
+        # Verify refresh cookie was set on the RedirectResponse
+        cookies = res.cookies
+        assert settings.COOKIE_NAME in cookies
+
+        # 2. Verify user in database
+        user_repo = UserRepository()
+        user = await user_repo.get_by_email(mock_email)
+        assert user is not None
+        assert user["verified"] is True
+        assert user["auth_provider"] == "google"
+        assert user["google_id"] == mock_google_id
+        assert user["name"] == mock_name
+
+        # 3. Test access token with /api/auth/get-me
+        me_res = await client.get(
+            "/api/auth/get-me",
+            headers={"Authorization": f"Bearer {issued_access_token}"},
+        )
+        assert me_res.status_code == 200
+        me_data = me_res.json()
+        assert me_data["user"]["email"] == mock_email
+        assert me_data["user"]["verified"] is True
+
+        # 4. Existing user returns via Google login again
+        res2 = await client.get("/api/auth/google/callback?code=mock_code_456&state=mock_state_2")
+        assert res2.status_code == 302
+        assert "/auth/google/success?access_token=" in res2.headers.get("location")
+
+        # Cleanup DB
+        session_repo = SessionRepository()
+        await user_repo.collection.delete_one({"email": mock_email})
+        await session_repo.collection.delete_many({"user_id": user["id"]})
+

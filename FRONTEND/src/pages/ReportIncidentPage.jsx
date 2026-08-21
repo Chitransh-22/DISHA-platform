@@ -4,6 +4,7 @@ import {
   Camera, Upload, X, CheckCircle, Loader2, LogIn, Shield,
   FileText, Zap, Clock
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 
 
@@ -84,7 +85,9 @@ const LoginPrompt = ({ onNavigate }) => (
 );
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export const ReportIncidentPage = ({ onNavigate, isLoggedIn = false }) => {
+export const ReportIncidentPage = ({ onNavigate, isLoggedIn: propIsLoggedIn }) => {
+  const { isLoggedIn: contextIsLoggedIn, user: contextUser } = useAuth();
+  const isLoggedIn = propIsLoggedIn !== undefined ? propIsLoggedIn : contextIsLoggedIn;
 
   // ── form state ──
   const [location, setLocation] = useState({ lat: null, lng: null, address: '', loading: false, error: '' });

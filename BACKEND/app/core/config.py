@@ -9,7 +9,7 @@ OAuth2 credentials, CORS policies, and cookie settings.
 import os
 from pathlib import Path
 from typing import List, Optional
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Base backend directory
@@ -30,7 +30,10 @@ class Settings(BaseSettings):
         "Disaster Intelligence and Situational Hazard Awareness Platform API"
     )
     VERSION: str = "1.0.0"
-    ENVIRONMENT: str = Field(default="development", alias="ENV")
+    ENVIRONMENT: str = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "ENV"),
+    )
     DEBUG: bool = False
     HOST: str = "127.0.0.1"
     PORT: int = 8000
@@ -38,14 +41,14 @@ class Settings(BaseSettings):
     # MongoDB Configuration
     MONGO_URI: str = Field(
         default="mongodb://localhost:27017/DISHA",
-        alias="MONGODB_URI",
+        validation_alias=AliasChoices("MONGO_URI", "MONGODB_URI"),
     )
     MONGO_DB: str = "DISHA"
 
     # JWT Authentication & Security
     JWT_SECRET: str = Field(
         default="disha-super-secret-jwt-key-2026-production-grade-sec-token",
-        alias="SECRET_KEY",
+        validation_alias=AliasChoices("JWT_SECRET", "JWT_SECRET_KEY", "SECRET_KEY"),
     )
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
@@ -61,7 +64,7 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = False  # Set to True in production (HTTPS)
     COOKIE_SAMESITE: str = "lax"  # 'lax', 'strict', or 'none'
     COOKIE_DOMAIN: Optional[str] = None
-    COOKIE_PATH: str = "/api/auth"
+    COOKIE_PATH: str = "/"
 
     # Frontend Integration & CORS
     FRONTEND_URL: str = "http://localhost:5173"
@@ -70,8 +73,20 @@ class Settings(BaseSettings):
 
     # Google OAuth2 / Gmail API Configuration
     GOOGLE_USER: Optional[str] = None
-    GOOGLE_CLIENT_ID: Optional[str] = None
-    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    GOOGLE_CLIENT_ID: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_ID"),
+    )
+    GOOGLE_CLIENT_SECRET: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_CLIENT_SECRET", "GOOGLE_OAUTH_CLIENT_SECRET"),
+    )
+    GOOGLE_REDIRECT_URI: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "GOOGLE_REDIRECT_URI", "GOOGLE_OAUTH_REDIRECT_URI", "GOOGLE_CALLBACK_URL"
+        ),
+    )
     GOOGLE_REFRESH_TOKEN: Optional[str] = None
 
     # SMTP Fallback Email Configuration

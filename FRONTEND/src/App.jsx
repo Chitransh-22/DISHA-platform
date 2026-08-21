@@ -18,10 +18,13 @@ function AppContent() {
   // If user arrives directly on an auth callback route
   useEffect(() => {
     if (window.location.pathname.startsWith('/auth/google/success')) {
-      let target = 'landing';
+      const searchParams = new URLSearchParams(window.location.search);
+      const hasError = searchParams.has('error');
+
+      let target = hasError ? 'auth' : 'landing';
       try {
         const savedRedirect = sessionStorage.getItem('disha_auth_redirect');
-        if (savedRedirect) {
+        if (savedRedirect && !hasError) {
           sessionStorage.removeItem('disha_auth_redirect');
           target = savedRedirect;
         }
