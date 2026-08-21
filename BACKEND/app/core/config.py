@@ -181,12 +181,27 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        return self.ENVIRONMENT.lower() in ("production", "prod")
+        env_lower = self.ENVIRONMENT.lower()
+        if env_lower in ("production", "prod"):
+            return True
+        if (
+            os.getenv("RENDER") == "true"
+            or bool(os.getenv("RENDER_SERVICE_ID"))
+            or bool(os.getenv("RENDER_EXTERNAL_URL"))
+            or bool(os.getenv("RENDER_EXTERNAL_HOSTNAME"))
+            or bool(os.getenv("VERCEL"))
+        ):
+            return True
+        if self.BACKEND_URL and "localhost" not in self.BACKEND_URL and "127.0.0.1" not in self.BACKEND_URL:
+            return True
+        if self.FRONTEND_URL and "localhost" not in self.FRONTEND_URL and "127.0.0.1" not in self.FRONTEND_URL:
+            return True
+        return False
 
     def get_effective_frontend_url(self, request=None) -> str:
         """
         Returns the resolved frontend URL for OAuth success/error browser redirection.
-        In production, prevents accidental redirection to localhost.
+        In production, guarantees browser is never redirected to localhost.
         """
         raw_frontend = (self.FRONTEND_URL or "").strip().rstrip("/")
         is_local_frontend = (
@@ -195,10 +210,24 @@ class Settings(BaseSettings):
             or "127.0.0.1" in raw_frontend
         )
 
-        if self.is_production and is_local_frontend:
+        # Check if incoming request is on a cloud/production hostname
+        is_cloud_request = False
+        if request:
+            req_host = (
+                request.headers.get("x-forwarded-host")
+                or request.headers.get("host")
+                or getattr(request.base_url, "hostname", "")
+                or ""
+            ).lower()
+            if req_host and "localhost" not in req_host and "127.0.0.1" not in req_host:
+                is_cloud_request = True
+
+        if (self.is_production or is_cloud_request) and is_local_frontend:
             if request:
-                origin_hdr = request.headers.get("origin") or request.headers.get("referer")
+                origin_hdr = (request.headers.get("origin") or request.headers.get("referer") or "").rstrip("/")
                 if origin_hdr:
+                    if origin_hdr.endswith(".vercel.app") or "disha-platform" in origin_hdr:
+                        return origin_hdr
                     for allowed in self.cors_origins_list:
                         if allowed != "*" and "localhost" not in allowed and "127.0.0.1" not in allowed:
                             if origin_hdr.startswith(allowed):
