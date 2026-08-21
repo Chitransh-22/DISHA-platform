@@ -1,18 +1,15 @@
 """
-DISHA Platform - Production Authentication & Authorization Routes
+DISHA Platform - Production Google OAuth Authentication Routes
 Disaster Intelligence and Situational Hazard Awareness Platform
 
-Implements RESTful endpoints for:
-- POST /api/auth/register
-- POST /api/auth/verify-email
-- POST /api/auth/resend-otp
-- POST /api/auth/login
+Implements RESTful endpoints for Google OAuth2 / OpenID Connect:
 - GET  /api/auth/google/login
-- GET  /api/auth/google/callback/
+- GET  /api/auth/google/callback
 - POST /api/auth/refresh-token
 - GET  /api/auth/get-me
 - POST /api/auth/logout
 - POST /api/auth/logout-all
+- GET  /api/auth/status
 """
 
 import base64
@@ -38,13 +35,8 @@ from app.core.config import settings
 from app.dependencies.auth import get_current_user
 from app.dependencies.rate_limiter import limit_rate
 from app.schemas.auth import (
-    AuthResponse,
-    LoginRequest,
     MessageResponse,
-    RegisterRequest,
-    ResendOTPRequest,
     TokenRefreshResponse,
-    VerifyEmailRequest,
 )
 from app.schemas.user import UserResponse
 from app.services.auth_service import AuthService
@@ -55,15 +47,12 @@ from app.utils.helpers import (
     set_refresh_cookie,
 )
 
-
 logger = logging.getLogger("disha.routes.auth")
-
 
 router = APIRouter(
     prefix="/api/auth",
     tags=["Authentication"],
 )
-
 
 _auth_service = AuthService()
 
@@ -99,7 +88,7 @@ def _get_google_redirect_uri(request: Request) -> str:
 
 
 # ============================================================
-# GOOGLE LOGIN
+# GOOGLE LOGIN INITIATE
 # ============================================================
 
 @router.get(
@@ -172,7 +161,7 @@ async def google_login(request: Request):
             return RedirectResponse(url=google_auth_url, status_code=status.HTTP_302_FOUND)
         except Exception as fallback_exc:
             logger.exception("Both Authlib and direct Google authorization fallback failed: %s", fallback_exc)
-            redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Unable to connect to Google OAuth service. Please try again or use email sign in.')}"
+            redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Unable to connect to Google OAuth service. Please try again.')}"
             return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
 
@@ -243,7 +232,7 @@ async def google_callback(
         redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus(safe_error)}"
         return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
-    # 2. Check for authorization code
+    # 3. Check for authorization code
     code = request.query_params.get("code")
     if not code:
         logger.warning("Google OAuth callback called without authorization code.")
@@ -251,7 +240,7 @@ async def google_callback(
         return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
     try:
-        # 3. Exchange authorization code with Google
+        # 4. Exchange authorization code with Google
         token = None
         try:
             token = await oauth.google.authorize_access_token(request)
@@ -293,7 +282,7 @@ async def google_callback(
             redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Invalid response from Google token endpoint.')}"
             return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
-        # 4. Retrieve Google user profile info
+        # 5. Retrieve Google user profile info
         user_info = token.get("userinfo")
         if not user_info:
             try:
@@ -354,7 +343,7 @@ async def google_callback(
             redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Google account did not provide required email or ID.')}"
             return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
-        # 5. Find or create DISHA user
+        # 6. Find or create DISHA user (preserve existing users, match by email or google_id)
         user = await _auth_service.user_repo.get_by_email(google_email)
 
         if not user:
@@ -407,7 +396,7 @@ async def google_callback(
             redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Database error creating or updating user account.')}"
             return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
 
-        # 6. Create normal DISHA session + JWTs
+        # 7. Create normal DISHA session + JWTs
         ip = get_client_ip(request)
         user_agent = get_user_agent(request)
 
@@ -417,7 +406,7 @@ async def google_callback(
             user_agent=user_agent,
         )
 
-        # 7. Construct frontend success redirect and attach refresh cookie to redirect response
+        # 8. Construct frontend success redirect and attach refresh cookie
         redirect_url = f"{frontend_url}/auth/google/success?access_token={access_token}&refresh_token={refresh_token}"
         redirect_response = RedirectResponse(
             url=redirect_url,
@@ -438,176 +427,6 @@ async def google_callback(
         logger.exception("Unexpected error during Google OAuth callback: %s", exc)
         redirect_err = f"{frontend_url}/auth/google/success?error={quote_plus('Google authentication failed.')}"
         return RedirectResponse(url=redirect_err, status_code=status.HTTP_302_FOUND)
-
-# ============================================================
-# REGISTER
-# ============================================================
-
-@router.post(
-    "/register",
-    response_model=MessageResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Register a new DISHA user account",
-    dependencies=[
-        Depends(
-            limit_rate(
-                "register",
-                max_requests=settings.RATE_LIMIT_REGISTER,
-            )
-        )
-    ],
-)
-async def register(req: RegisterRequest):
-    """
-    Registers a new citizen/responder user account
-    and triggers email verification via OTP.
-    """
-
-    result = await _auth_service.register(
-        email=req.email,
-        password=req.password,
-        username=req.username,
-        name=req.name,
-        phone=req.phone,
-        city=req.city,
-        pincode=req.pincode,
-    )
-
-    return MessageResponse(
-        message=result["message"],
-        success=True,
-        data={
-            "user_id": result["user_id"],
-            "email": result["email"],
-            "verified": result["verified"],
-        },
-    )
-
-
-# ============================================================
-# VERIFY EMAIL
-# ============================================================
-
-@router.post(
-    "/verify-email",
-    summary="Verify email address with 6-digit OTP",
-    dependencies=[
-        Depends(
-            limit_rate(
-                "verify-email",
-                max_requests=settings.RATE_LIMIT_OTP,
-            )
-        )
-    ],
-)
-async def verify_email(
-    req: VerifyEmailRequest,
-    request: Request,
-    response: Response,
-):
-    """
-    Verifies user's email address using the supplied 6-digit OTP and authenticates the user.
-    """
-    ip = get_client_ip(request)
-    user_agent = get_user_agent(request)
-
-    result = await _auth_service.verify_email(
-        email=req.email,
-        otp=req.otp,
-        ip=ip,
-        user_agent=user_agent,
-    )
-
-    if isinstance(result, dict) and "refresh_token" in result:
-        set_refresh_cookie(response, result["refresh_token"])
-
-    return result
-
-
-# ============================================================
-# RESEND OTP
-# ============================================================
-
-@router.post(
-    "/resend-otp",
-    response_model=MessageResponse,
-    summary="Resend verification OTP",
-    dependencies=[
-        Depends(
-            limit_rate(
-                "resend-otp",
-                max_requests=settings.RATE_LIMIT_OTP,
-            )
-        )
-    ],
-)
-async def resend_otp(req: ResendOTPRequest):
-    """
-    Resends a fresh 6-digit verification OTP
-    to the user's email address.
-    """
-
-    result = await _auth_service.resend_otp(
-        email=req.email
-    )
-
-    return MessageResponse(
-        message=result["message"],
-        success=True,
-    )
-
-
-# ============================================================
-# LOGIN
-# ============================================================
-
-@router.post(
-    "/login",
-    response_model=AuthResponse,
-    summary="Sign in with email and password",
-    dependencies=[
-        Depends(
-            limit_rate(
-                "login",
-                max_requests=settings.RATE_LIMIT_LOGIN,
-            )
-        )
-    ],
-)
-async def login(
-    req: LoginRequest,
-    request: Request,
-    response: Response,
-):
-    """
-    Authenticates a verified user.
-
-    - Issues short-lived access JWT
-    - Sets long-lived refresh JWT in HTTP-only cookie
-    - Tracks active session with client IP and User-Agent
-    """
-
-    ip = get_client_ip(request)
-    user_agent = get_user_agent(request)
-
-    access_token, refresh_token, user_dict = await _auth_service.login(
-        email_or_username=req.email,
-        password=req.password,
-        ip=ip,
-        user_agent=user_agent,
-    )
-
-    set_refresh_cookie(
-        response,
-        refresh_token,
-    )
-
-    return AuthResponse(
-        message="Sign in successful",
-        access_token=access_token,
-        token_type="bearer",
-        user=UserResponse(**user_dict),
-    )
 
 
 # ============================================================
@@ -641,10 +460,7 @@ async def refresh_token_endpoint(
 
     Executes refresh token rotation.
     """
-
-    token = refresh_token or request.headers.get(
-        "x-refresh-token"
-    )
+    token = refresh_token or request.headers.get("x-refresh-token")
 
     if not token:
         raise HTTPException(
@@ -655,12 +471,10 @@ async def refresh_token_endpoint(
     ip = get_client_ip(request)
     user_agent = get_user_agent(request)
 
-    new_access_token, new_refresh_token = (
-        await _auth_service.refresh_tokens(
-            refresh_token=token,
-            ip=ip,
-            user_agent=user_agent,
-        )
+    new_access_token, new_refresh_token = await _auth_service.refresh_tokens(
+        refresh_token=token,
+        ip=ip,
+        user_agent=user_agent,
     )
 
     set_refresh_cookie(
@@ -690,20 +504,14 @@ async def get_me(
     Returns profile information of the currently
     authenticated user.
     """
-
     return {
         "message": "User fetched successfully",
         "user": {
-            "id": str(
-                current_user.get("id")
-                or current_user.get("_id")
-            ),
+            "id": str(current_user.get("id") or current_user.get("_id")),
             "username": current_user.get("username"),
             "email": current_user.get("email"),
-            "verified": current_user.get(
-                "verified",
-                False,
-            ),
+            "verified": current_user.get("verified", True),
+            "auth_provider": current_user.get("auth_provider", "google"),
             "name": current_user.get("name"),
             "phone": current_user.get("phone"),
             "city": current_user.get("city"),
@@ -732,14 +540,10 @@ async def logout(
 ):
     """
     Logs out the user.
-
     - Revokes the active session
     - Clears refresh token cookie
     """
-
-    token = refresh_token or request.headers.get(
-        "x-refresh-token"
-    )
+    token = refresh_token or request.headers.get("x-refresh-token")
 
     await _auth_service.logout(
         refresh_token=token
@@ -770,11 +574,7 @@ async def logout_all(
     Revokes all active sessions across all devices
     for the current authenticated user.
     """
-
-    user_id = str(
-        current_user.get("id")
-        or current_user.get("_id")
-    )
+    user_id = str(current_user.get("id") or current_user.get("_id"))
 
     revoked_count = await _auth_service.logout_all(
         user_id=user_id
@@ -783,12 +583,26 @@ async def logout_all(
     clear_refresh_cookie(response)
 
     return MessageResponse(
-        message=(
-            f"Logged out from all devices "
-            f"({revoked_count} active sessions revoked)"
-        ),
+        message=f"Logged out from all devices ({revoked_count} active sessions revoked)",
         success=True,
         data={
             "revoked_sessions": revoked_count
         },
     )
+
+
+# ============================================================
+# AUTH STATUS
+# ============================================================
+
+@router.get(
+    "/status",
+    summary="Check authentication service status",
+)
+async def auth_status():
+    """Returns authentication service health status."""
+    return {
+        "status": "active",
+        "provider": "google_oauth",
+        "auth_methods": ["google"],
+    }

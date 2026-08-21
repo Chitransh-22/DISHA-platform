@@ -3,7 +3,7 @@ DISHA Platform - Verification Email Delivery Service
 Disaster Intelligence and Situational Hazard Awareness Platform
 
 Supports:
-1. Brevo (Sendinblue) Transactional HTTPS API Delivery
+1. Brevo (Sendinblue) Transactional HTTPS API Delivery (with HTML + Plain-Text multipart for maximum deliverability)
 2. Development Console Simulation (when credentials not configured)
 """
 
@@ -29,7 +29,27 @@ def mask_recipient(recipient: str) -> str:
     return f"{masked_user}@{domain}"
 
 
+def generate_disha_email_text(otp: str, username: Optional[str] = None) -> str:
+    """Generates clean plain-text fallback content to prevent spam filter penalization."""
+    user_greeting = f"Hello {username}," if username else "Hello,"
+    return (
+        f"DISHA Platform Account Verification\n"
+        f"National Disaster Intelligence and Situational Hazard Awareness\n\n"
+        f"{user_greeting}\n\n"
+        f"Thank you for creating an account on the DISHA Emergency Situational Awareness Platform.\n\n"
+        f"Your 6-digit verification code is: {otp}\n\n"
+        f"This code is valid for {settings.OTP_EXPIRE_MINUTES} minutes.\n\n"
+        f"Security Notice:\n"
+        f"- Never share this verification code with anyone.\n"
+        f"- DISHA personnel will never request your OTP.\n"
+        f"- If you did not request this registration, please safely ignore this email.\n\n"
+        f"— DISHA Platform Team\n"
+        f"National Early Warning & Disaster Awareness Network"
+    )
+
+
 def generate_disha_email_html(otp: str, username: Optional[str] = None) -> str:
+    """Generates official DISHA branded HTML verification template."""
     user_greeting = f"Hello {username}," if username else "Hello,"
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -163,15 +183,16 @@ def _send_brevo_email_sync(
     username: Optional[str] = None,
 ) -> bool:
     """Synchronous Brevo HTTPS API delivery helper."""
-    masked = mask_recipient(recipient)
+    clean_recipient = recipient.strip().lower()
+    masked = mask_recipient(clean_recipient)
     logger.info("OTP delivery request initiated for recipient: %s", masked)
 
     # 1. Brevo HTTPS API delivery
     if settings.BREVO_API_KEY:
         sender_email = (
-            settings.BREVO_SENDER_EMAIL
-            or settings.SMTP_FROM
-            or settings.SMTP_USER
+            (settings.BREVO_SENDER_EMAIL or "").strip()
+            or (settings.SMTP_FROM or "").strip()
+            or (settings.SMTP_USER or "").strip()
             or "no-reply@disha.gov.in"
         )
         sender_name = settings.BREVO_SENDER_NAME or "DISHA Platform"
@@ -183,10 +204,12 @@ def _send_brevo_email_sync(
         )
 
         headers = {
-            "api-key": settings.BREVO_API_KEY,
+            "api-key": settings.BREVO_API_KEY.strip(),
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+
+        text_content = generate_disha_email_text(otp=otp or "------", username=username)
 
         payload = {
             "sender": {
@@ -195,12 +218,17 @@ def _send_brevo_email_sync(
             },
             "to": [
                 {
-                    "email": recipient,
+                    "email": clean_recipient,
                     "name": username or "User",
                 }
             ],
+            "replyTo": {
+                "name": sender_name,
+                "email": sender_email,
+            },
             "subject": subject,
             "htmlContent": html_content,
+            "textContent": text_content,
         }
 
         try:
@@ -212,10 +240,16 @@ def _send_brevo_email_sync(
                 )
 
             if res.status_code in (200, 201, 202):
+                msg_id = ""
+                try:
+                    msg_id = res.json().get("messageId", "")
+                except Exception:
+                    pass
                 logger.info(
-                    "Email delivery status: %s (Delivered to %s via Brevo HTTPS API)",
+                    "Email delivery status: %s (Accepted by Brevo HTTPS API for %s, messageId: %s)",
                     res.status_code,
                     masked,
+                    msg_id,
                 )
                 return True
 
@@ -283,18 +317,20 @@ async def send_verification_email(
     """
     Sends a verification OTP email asynchronously using the Brevo HTTPS Transactional API.
     """
-    masked = mask_recipient(email)
+    clean_recipient = email.strip().lower()
+    masked = mask_recipient(clean_recipient)
     subject = f"DISHA Verification Code: {otp}"
     html = generate_disha_email_html(otp=otp, username=username)
+    text = generate_disha_email_text(otp=otp, username=username)
 
     logger.info("OTP delivery request initiated for recipient: %s", masked)
 
     # 1. Brevo HTTPS Transactional API Delivery
     if settings.BREVO_API_KEY:
         sender_email = (
-            settings.BREVO_SENDER_EMAIL
-            or settings.SMTP_FROM
-            or settings.SMTP_USER
+            (settings.BREVO_SENDER_EMAIL or "").strip()
+            or (settings.SMTP_FROM or "").strip()
+            or (settings.SMTP_USER or "").strip()
             or "no-reply@disha.gov.in"
         )
         sender_name = settings.BREVO_SENDER_NAME or "DISHA Platform"
@@ -306,7 +342,7 @@ async def send_verification_email(
         )
 
         headers = {
-            "api-key": settings.BREVO_API_KEY,
+            "api-key": settings.BREVO_API_KEY.strip(),
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
@@ -318,12 +354,17 @@ async def send_verification_email(
             },
             "to": [
                 {
-                    "email": email,
+                    "email": clean_recipient,
                     "name": username or "User",
                 }
             ],
+            "replyTo": {
+                "name": sender_name,
+                "email": sender_email,
+            },
             "subject": subject,
             "htmlContent": html,
+            "textContent": text,
         }
 
         try:
@@ -335,10 +376,16 @@ async def send_verification_email(
                 )
 
             if res.status_code in (200, 201, 202):
+                msg_id = ""
+                try:
+                    msg_id = res.json().get("messageId", "")
+                except Exception:
+                    pass
                 logger.info(
-                    "Email delivery status: %s (Delivered to %s via Brevo HTTPS API)",
+                    "Email delivery status: %s (Accepted by Brevo HTTPS API for %s, messageId: %s)",
                     res.status_code,
                     masked,
+                    msg_id,
                 )
                 return True
 

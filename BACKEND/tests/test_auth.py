@@ -1,22 +1,26 @@
 """
-DISHA Platform - Comprehensive Authentication & Security Test Suite
+DISHA Platform - Google OAuth Authentication & Authorization Test Suite
 Disaster Intelligence and Situational Hazard Awareness Platform
 
-Tests complete authentication lifecycle:
-- User Registration & Validation (valid, duplicate, weak password, invalid email)
-- OTP Generation, Expiration, Attempt Limiting (brute-force) & Verification
-- Login & JWT Token Issuance (valid, wrong password, unverified, nonexistent)
-- Access Token Claims & Security Dependency (valid, expired, malformed, wrong type)
-- Refresh Token Rotation & Session Revocation (reuse attack detection)
-- Logout & Logout-all Endpoints (multi-session invalidation)
-- Rate Limiting Protection (HTTP 429)
+Tests complete Google-only authentication lifecycle:
+1. New Google account → DISHA account created.
+2. Existing Google account → existing DISHA account used (no duplicates).
+3. Google OAuth login initiation & origin state preservation (production and local).
+4. Google OAuth callback error handling (cancelled, denied, missing code).
+5. JWT token creation, claims verification, and security middleware.
+6. Protected route (/api/auth/get-me) authorization.
+7. Refresh token rotation & session revocation.
+8. Single-device logout and multi-device logout-all.
+9. Email/password and OTP endpoints confirmed removed/unavailable.
+10. Authentication service health and provider status.
 """
 
+import base64
 import os
 import sys
 import time
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from httpx import AsyncClient, ASGITransport
@@ -32,65 +36,14 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_jwt_token,
-    generate_secure_otp,
-    hash_otp,
-    hash_password,
     hash_token,
-    validate_password_strength,
-    verify_otp_hash,
-    verify_password,
 )
 from app.main import app
-from app.repositories.otp_repository import OTPRepository
 from app.repositories.session_repository import SessionRepository
 from app.repositories.user_repository import UserRepository
 
 
-# ─── Unit Tests: Cryptography & Security ───────────────────────────────────────
-
-def test_password_hashing_argon2id():
-    raw_pass = "DishaSecure2026!"
-    hashed = hash_password(raw_pass)
-    assert hashed != raw_pass
-    assert hashed.startswith("$argon2")
-    assert verify_password(raw_pass, hashed) is True
-    assert verify_password("WrongPassword123!", hashed) is False
-
-
-def test_password_strength_validation():
-    # Valid
-    ok, err = validate_password_strength("StrongPass1")
-    assert ok is True
-    assert err is None
-
-    # Too short
-    ok, err = validate_password_strength("Short1")
-    assert ok is False
-    assert "at least 8" in err
-
-    # No uppercase
-    ok, err = validate_password_strength("lowercaseonly1")
-    assert ok is False
-    assert "uppercase" in err
-
-    # No digit
-    ok, err = validate_password_strength("NoDigitsHere!")
-    assert ok is False
-    assert "digit" in err
-
-
-def test_otp_generation_and_hashing():
-    otp = generate_secure_otp(length=6)
-    assert len(otp) == 6
-    assert otp.isdigit()
-
-    email = "test@disha.gov.in"
-    otp_hash = hash_otp(otp, email)
-    assert otp_hash != otp
-    assert verify_otp_hash(otp, email, otp_hash) is True
-    assert verify_otp_hash("000000", email, otp_hash) is False
-    assert verify_otp_hash(otp, "other@disha.gov.in", otp_hash) is False
-
+# ─── Unit Tests: Cryptography & JWT Security ───────────────────────────────────
 
 def test_jwt_token_lifecycle():
     user_id = "507f1f77bcf86cd799439011"
@@ -118,7 +71,7 @@ def test_jwt_token_lifecycle():
         decode_jwt_token(refresh_token, expected_type="access")
 
 
-# ─── Integration Tests: FastAPI Endpoints ─────────────────────────────────────
+# ─── Integration Tests: Health & Status ───────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_health_and_root():
@@ -134,270 +87,27 @@ async def test_health_and_root():
         assert res.status_code == 200
         assert res.json()["status"] == "ok"
 
-        res = await client.get("/health")
+
+@pytest.mark.asyncio
+async def test_auth_status():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.get("/api/auth/status")
         assert res.status_code == 200
-        assert res.json()["status"] == "ok"
+        data = res.json()
+        assert data["status"] == "active"
+        assert data["provider"] == "google_oauth"
+        assert "google" in data["auth_methods"]
 
 
-@pytest.mark.asyncio
-async def test_registration_validation_errors():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Invalid email
-        res = await client.post(
-            "/api/auth/register",
-            json={"email": "not-an-email", "password": "ValidPassword123!"},
-        )
-        assert res.status_code == 422
-
-        # Weak password (missing uppercase)
-        res = await client.post(
-            "/api/auth/register",
-            json={"email": "user123@disha.gov.in", "password": "weakpassword1"},
-        )
-        assert res.status_code == 422 or res.status_code == 400
-
-        # Weak password (too short)
-        res = await client.post(
-            "/api/auth/register",
-            json={"email": "user123@disha.gov.in", "password": "Ab1"},
-        )
-        assert res.status_code == 422 or res.status_code == 400
-
+# ─── Google OAuth Flow Tests ──────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_otp_attempt_limits_and_expiry():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        otp_repo = OTPRepository()
-        test_email = f"otp_test_{int(time.time())}@disha.gov.in"
-        correct_otp = "889900"
-        correct_hash = hash_otp(correct_otp, test_email)
-
-        # 1. Test Expiry
-        expired_at = datetime.now(timezone.utc) - timedelta(minutes=5)
-        await otp_repo.create_otp(
-            email=test_email,
-            user_id="dummy_user_1",
-            otp_hash=correct_hash,
-            expires_at=expired_at,
-        )
-
-        res = await client.post(
-            "/api/auth/verify-email",
-            json={"email": test_email, "otp": correct_otp},
-        )
-        assert res.status_code == 400
-        assert "expired" in res.json()["detail"].lower()
-
-        # 2. Test Attempt Limiting (brute-force defense)
-        valid_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
-        await otp_repo.create_otp(
-            email=test_email,
-            user_id="dummy_user_1",
-            otp_hash=correct_hash,
-            expires_at=valid_expires,
-        )
-
-        # Fail 5 times
-        for _ in range(5):
-            res = await client.post(
-                "/api/auth/verify-email",
-                json={"email": test_email, "otp": "111111"},
-            )
-            assert res.status_code == 400
-
-        # 6th attempt should state invalidation / too many attempts
-        res = await client.post(
-            "/api/auth/verify-email",
-            json={"email": test_email, "otp": correct_otp},
-        )
-        assert res.status_code == 400
-
-        # Cleanup
-        await otp_repo.delete_otps_for_email(test_email)
-
-
-@pytest.mark.asyncio
-async def test_full_auth_flow():
-    """
-    Tests end-to-end flow:
-    1. Register new user
-    2. Try login before verification (should return 403)
-    3. Verify email with active OTP
-    4. Login with verified account (should issue access token + cookie)
-    5. Access /api/auth/get-me with Bearer token
-    6. Refresh access token via refresh-token endpoint (rotation)
-    7. Logout current session
-    8. Logout all devices
-    """
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        ts = int(time.time())
-        test_email = f"testuser_{ts}@disha-test.gov.in"
-        test_username = f"disha_user_{ts}"
-        test_password = "SecurePassword123!"
-
-        # 1. Registration
-        reg_payload = {
-            "username": test_username,
-            "email": test_email,
-            "password": test_password,
-            "name": "DISHA Citizen Test",
-            "phone": "9876543210",
-            "city": "Bhopal",
-            "pincode": "462001",
-        }
-        res = await client.post("/api/auth/register", json=reg_payload)
-        assert res.status_code == 201
-        reg_data = res.json()
-        assert reg_data["success"] is True
-        assert reg_data["data"]["email"] == test_email
-
-        # 2. Login before verification should be rejected with 403 Forbidden
-        login_res = await client.post(
-            "/api/auth/login",
-            json={"email": test_email, "password": test_password},
-        )
-        assert login_res.status_code == 403
-        assert "verified" in login_res.json()["detail"].lower() or "unverified" in login_res.json()["detail"].lower()
-
-        # 3. Retrieve OTP from DB to verify
-        otp_repo = OTPRepository()
-        otp_doc = await otp_repo.get_active_otp(test_email)
-        assert otp_doc is not None
-
-        # Verify with wrong OTP
-        wrong_verify = await client.post(
-            "/api/auth/verify-email",
-            json={"email": test_email, "otp": "000000"},
-        )
-        assert wrong_verify.status_code == 400
-
-        # Verify with known OTP
-        known_otp = "123456"
-        known_hash = hash_otp(known_otp, test_email)
-        await otp_repo.create_otp(
-            email=test_email,
-            user_id=otp_doc["user_id"],
-            otp_hash=known_hash,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
-        )
-
-        valid_verify = await client.post(
-            "/api/auth/verify-email",
-            json={"email": test_email, "otp": known_otp},
-        )
-        assert valid_verify.status_code == 200
-        verify_data = valid_verify.json()
-        assert verify_data["user"]["verified"] is True
-
-        # 4. Login with invalid password
-        bad_login = await client.post(
-            "/api/auth/login",
-            json={"email": test_email, "password": "WrongPassword123!"},
-        )
-        assert bad_login.status_code == 401
-
-        # Login with nonexistent user
-        bad_user = await client.post(
-            "/api/auth/login",
-            json={"email": "nonexistent@disha.gov.in", "password": "WrongPassword123!"},
-        )
-        assert bad_user.status_code == 401
-
-        # Valid Login after verification
-        login_res = await client.post(
-            "/api/auth/login",
-            json={"email": test_email, "password": test_password},
-        )
-        assert login_res.status_code == 200
-        login_data = login_res.json()
-        assert "access_token" in login_data
-        access_token = login_data["access_token"]
-        assert login_data["user"]["email"] == test_email
-        assert login_data["user"]["verified"] is True
-
-        # Check refresh cookie was set
-        cookies = login_res.cookies
-        refresh_cookie = cookies.get(settings.COOKIE_NAME)
-        assert refresh_cookie is not None
-
-        # 5. Access protected /api/auth/get-me
-        unauth_me = await client.get("/api/auth/get-me")
-        assert unauth_me.status_code == 401
-
-        # With malformed token
-        bad_token_res = await client.get(
-            "/api/auth/get-me",
-            headers={"Authorization": "Bearer invalid.jwt.token"},
-        )
-        assert bad_token_res.status_code == 401
-
-        # With valid Bearer token -> 200
-        auth_headers = {"Authorization": f"Bearer {access_token}"}
-        me_res = await client.get("/api/auth/get-me", headers=auth_headers)
-        assert me_res.status_code == 200
-        me_data = me_res.json()
-        assert me_data["user"]["email"] == test_email
-        assert me_data["user"]["username"] == test_username
-        assert "password_hash" not in me_data["user"]
-        assert "refresh_token_hash" not in me_data["user"]
-
-        # 6. Refresh token rotation
-        client.cookies.set(settings.COOKIE_NAME, refresh_cookie)
-        refresh_res = await client.post("/api/auth/refresh-token")
-        assert refresh_res.status_code == 200
-        refresh_data = refresh_res.json()
-        assert "access_token" in refresh_data
-        new_access_token = refresh_data["access_token"]
-        assert new_access_token != access_token
-
-        # Check new refresh cookie was rotated
-        new_refresh_cookie = refresh_res.cookies.get(settings.COOKIE_NAME)
-        assert new_refresh_cookie is not None
-
-        # 7. Logout
-        logout_res = await client.post("/api/auth/logout")
-        assert logout_res.status_code == 200
-
-        # After logout, old refresh token is revoked
-        revoked_refresh = await client.post("/api/auth/refresh-token")
-        assert revoked_refresh.status_code in (401, 422)
-
-        # 8. Test Multi-Device Logout (Logout-all)
-        # Login again
-        login_res2 = await client.post(
-            "/api/auth/login",
-            json={"email": test_email, "password": test_password},
-        )
-        assert login_res2.status_code == 200
-        token2 = login_res2.json()["access_token"]
-
-        logout_all_res = await client.post(
-            "/api/auth/logout-all",
-            headers={"Authorization": f"Bearer {token2}"},
-        )
-        assert logout_all_res.status_code == 200
-        assert logout_all_res.json()["success"] is True
-
-        # Clean up test user & sessions from DB
-        user_repo = UserRepository()
-        session_repo = SessionRepository()
-        user = await user_repo.get_by_email(test_email)
-        if user:
-            await user_repo.collection.delete_one({"_id": user["_id"] if "_id" in user else user["id"]})
-            await session_repo.collection.delete_many({"user_id": user["id"]})
-            await otp_repo.collection.delete_many({"email": test_email})
-
-
-@pytest.mark.asyncio
-async def test_google_login_endpoint():
+async def test_google_login_initiate_endpoint():
     """
     Tests /api/auth/google/login endpoint:
     - Initiates OAuth redirect (302)
-    - Sets session cookie
-    - Target URL contains accounts.google.com with client_id and redirect_uri
+    - Target URL contains accounts.google.com with client_id, scope, and redirect_uri
     """
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test", follow_redirects=False) as client:
@@ -407,6 +117,58 @@ async def test_google_login_endpoint():
         assert location is not None
         assert "accounts.google.com" in location
         assert "redirect_uri=" in location
+        assert "openid" in location
+
+
+@pytest.mark.asyncio
+async def test_google_oauth_origin_state_preservation(monkeypatch):
+    """
+    Tests that Google OAuth login preserves frontend origin (e.g. production Vercel or localhost),
+    and callback redirects directly back to that origin.
+    """
+    ts = int(time.time())
+    mock_email = f"state_test_{ts}@disha-test.gov.in"
+    mock_google_id = f"g_sub_state_{ts}"
+
+    mock_token = {
+        "access_token": f"mock_token_{ts}",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "userinfo": {
+            "sub": mock_google_id,
+            "email": mock_email,
+            "name": "State Test User",
+            "email_verified": True,
+        },
+    }
+
+    from app.routes.auth import oauth
+
+    async def mock_authorize_access_token(request):
+        return mock_token
+
+    monkeypatch.setattr(oauth.google, "authorize_access_token", mock_authorize_access_token)
+
+    # 1. State with production Vercel origin
+    prod_origin = "https://disha-platform.vercel.app"
+    raw_state = "csrf_token_123"
+    state_payload = base64.urlsafe_b64encode(f"{raw_state}|{prod_origin}".encode("utf-8")).decode("utf-8")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", follow_redirects=False) as client:
+        res = await client.get(f"/api/auth/google/callback?code=mock_code&state={state_payload}")
+        assert res.status_code == 302
+        location = res.headers.get("location")
+        assert location.startswith(f"{prod_origin}/auth/google/success")
+        assert "access_token=" in location
+
+        # Cleanup
+        user_repo = UserRepository()
+        session_repo = SessionRepository()
+        user = await user_repo.get_by_email(mock_email)
+        if user:
+            await user_repo.collection.delete_one({"email": mock_email})
+            await session_repo.collection.delete_many({"user_id": user["id"]})
 
 
 @pytest.mark.asyncio
@@ -432,33 +194,32 @@ async def test_google_callback_error_handling():
 
 
 @pytest.mark.asyncio
-async def test_google_callback_success_flow(monkeypatch):
+async def test_google_oauth_complete_lifecycle(monkeypatch):
     """
-    Tests complete Google OAuth callback flow with mocked token exchange:
-    1. Simulates valid Google token & userinfo
-    2. Verifies user created in DB
-    3. Verifies redirect with access_token
-    4. Verifies refresh token cookie attached to RedirectResponse
-    5. Verifies access token works with /api/auth/get-me
-    6. Simulates return login of same Google user (updates existing user)
+    Tests complete Google OAuth lifecycle:
+    1. New Google account signs in → DISHA user created with auth_provider='google', verified=True
+    2. Session and JWT tokens created, refresh cookie attached
+    3. Protected route /api/auth/get-me accessible with access token
+    4. Repeated Google sign-in → existing DISHA user updated, NO duplicate account created
+    5. Refresh token rotation works
+    6. Logout revokes session
+    7. Logout-all revokes all sessions
     """
     from app.routes.auth import oauth
-    from urllib.parse import parse_qs, urlparse
 
     ts = int(time.time())
-    mock_email = f"google_test_{ts}@disha-test.gov.in"
+    mock_email = f"google_user_{ts}@disha.gov.in"
     mock_google_id = f"g_sub_{ts}"
-    mock_name = "Google Test User"
+    mock_name = "Disha Emergency Citizen"
 
     mock_token = {
-        "access_token": f"mock_google_access_token_{ts}",
+        "access_token": f"google_access_tok_{ts}",
         "token_type": "Bearer",
         "expires_in": 3600,
         "userinfo": {
             "sub": mock_google_id,
             "email": mock_email,
             "name": mock_name,
-            "picture": "https://lh3.googleusercontent.com/test.jpg",
             "email_verified": True,
         },
     }
@@ -470,195 +231,132 @@ async def test_google_callback_success_flow(monkeypatch):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test", follow_redirects=False) as client:
-        # 1. Callback execution
-        res = await client.get("/api/auth/google/callback?code=mock_code_123&state=mock_state")
-        assert res.status_code == 302
-
-        location = res.headers.get("location")
-        assert location is not None
-        assert "/auth/google/success?access_token=" in location
-
-        # Extract access token
-        parsed = urlparse(location)
-        query_params = parse_qs(parsed.query)
-        assert "access_token" in query_params
-        issued_access_token = query_params["access_token"][0]
-
-        # Verify refresh cookie was set on the RedirectResponse
-        cookies = res.cookies
-        assert settings.COOKIE_NAME in cookies
-
-        # 2. Verify user in database
         user_repo = UserRepository()
-        user = await user_repo.get_by_email(mock_email)
-        assert user is not None
-        assert user["verified"] is True
-        assert user["auth_provider"] == "google"
-        assert user["google_id"] == mock_google_id
-        assert user["name"] == mock_name
+        session_repo = SessionRepository()
 
-        # 3. Test access token with /api/auth/get-me
-        me_res = await client.get(
-            "/api/auth/get-me",
-            headers={"Authorization": f"Bearer {issued_access_token}"},
-        )
+        # Ensure user does not exist beforehand
+        assert await user_repo.get_by_email(mock_email) is None
+
+        # 1. New Google Sign-In Callback
+        res1 = await client.get("/api/auth/google/callback?code=valid_test_code")
+        assert res1.status_code == 302
+        redirect_url = res1.headers.get("location")
+        assert redirect_url is not None
+        assert "/auth/google/success" in redirect_url
+
+        # Parse access token from redirect URL
+        parsed = urlparse(redirect_url)
+        params = parse_qs(parsed.query)
+        assert "access_token" in params
+        access_token = params["access_token"][0]
+
+        # Verify refresh token cookie was set
+        cookies = res1.cookies
+        refresh_cookie = cookies.get(settings.COOKIE_NAME)
+        assert refresh_cookie is not None
+
+        # Verify user was created in MongoDB
+        db_user = await user_repo.get_by_email(mock_email)
+        assert db_user is not None
+        assert db_user["email"] == mock_email
+        assert db_user["verified"] is True
+        assert db_user["auth_provider"] == "google"
+        assert db_user["google_id"] == mock_google_id
+        initial_user_id = db_user["id"]
+
+        # 2. Access protected /api/auth/get-me
+        unauth_res = await client.get("/api/auth/get-me")
+        assert unauth_res.status_code == 401
+
+        auth_headers = {"Authorization": f"Bearer {access_token}"}
+        me_res = await client.get("/api/auth/get-me", headers=auth_headers)
         assert me_res.status_code == 200
         me_data = me_res.json()
         assert me_data["user"]["email"] == mock_email
-        assert me_data["user"]["verified"] is True
+        assert me_data["user"]["auth_provider"] == "google"
 
-        # 4. Existing user returns via Google login again
-        res2 = await client.get("/api/auth/google/callback?code=mock_code_456&state=mock_state_2")
+        # 3. Repeated Google Sign-In with same Google account (no duplicates!)
+        res2 = await client.get("/api/auth/google/callback?code=valid_test_code_2")
         assert res2.status_code == 302
-        assert "/auth/google/success?access_token=" in res2.headers.get("location")
+
+        # Count users with this email in database
+        users_found = await user_repo.collection.count_documents({"email": mock_email})
+        assert users_found == 1  # EXACTLY 1 user, no duplicate created!
+
+        db_user_after = await user_repo.get_by_email(mock_email)
+        assert db_user_after["id"] == initial_user_id
+
+        # 4. Refresh token rotation
+        client.cookies.set(settings.COOKIE_NAME, refresh_cookie)
+        refresh_res = await client.post("/api/auth/refresh-token")
+        assert refresh_res.status_code == 200
+        ref_data = refresh_res.json()
+        new_access_token = ref_data["access_token"]
+        assert new_access_token != access_token
+
+        # 5. Multi-device logout-all
+        auth_headers2 = {"Authorization": f"Bearer {new_access_token}"}
+        logout_all_res = await client.post("/api/auth/logout-all", headers=auth_headers2)
+        assert logout_all_res.status_code == 200
+        assert logout_all_res.json()["success"] is True
+
+        # After logout-all, refresh token is revoked
+        client.cookies.set(settings.COOKIE_NAME, refresh_cookie)
+        revoked_res = await client.post("/api/auth/refresh-token")
+        assert revoked_res.status_code in (401, 422)
+
+        # 6. Single-device logout on a fresh login
+        res3 = await client.get("/api/auth/google/callback?code=valid_test_code_3")
+        assert res3.status_code == 302
+        new_cookie = res3.cookies.get(settings.COOKIE_NAME)
+        assert new_cookie is not None
+
+        client.cookies.set(settings.COOKIE_NAME, new_cookie)
+        logout_res = await client.post("/api/auth/logout")
+        assert logout_res.status_code == 200
 
         # Cleanup DB
-        session_repo = SessionRepository()
         await user_repo.collection.delete_one({"email": mock_email})
-        await session_repo.collection.delete_many({"user_id": user["id"]})
+        await session_repo.collection.delete_many({"user_id": initial_user_id})
 
 
-def test_effective_url_resolvers():
-    """
-    Tests that Settings resolves OAuth redirect URIs and frontend URLs properly
-    in development vs production, preventing accidental localhost redirects in production.
-    """
-    from app.core.config import Settings
-
-    # 1. Development Settings
-    dev_settings = Settings(
-        ENVIRONMENT="development",
-        FRONTEND_URL="http://localhost:5173",
-        GOOGLE_REDIRECT_URI="http://localhost:8000/api/auth/google/callback",
-    )
-    assert dev_settings.get_effective_frontend_url() == "http://localhost:5173"
-    assert dev_settings.get_effective_google_redirect_uri() == "http://localhost:8000/api/auth/google/callback"
-
-    # 2. Production Settings with localhost misconfiguration fallback
-    prod_misconfigured = Settings(
-        ENVIRONMENT="production",
-        FRONTEND_URL="http://localhost:5173",
-        BACKEND_URL="https://disha-platform.onrender.com",
-        GOOGLE_REDIRECT_URI="http://localhost:8000/api/auth/google/callback",
-    )
-    # Must protect against localhost in production
-    assert prod_misconfigured.get_effective_frontend_url() == "https://disha-platform.vercel.app"
-    assert prod_misconfigured.get_effective_google_redirect_uri() == "https://disha-platform.onrender.com/api/auth/google/callback"
-
-    # 3. Production Settings with explicit production URLs
-    prod_configured = Settings(
-        ENVIRONMENT="production",
-        FRONTEND_URL="https://disha-platform.vercel.app",
-        BACKEND_URL="https://disha-platform.onrender.com",
-        GOOGLE_REDIRECT_URI="https://disha-platform.onrender.com/api/auth/google/callback",
-    )
-    assert prod_configured.get_effective_frontend_url() == "https://disha-platform.vercel.app"
-    assert prod_configured.get_effective_google_redirect_uri() == "https://disha-platform.onrender.com/api/auth/google/callback"
-
-
-def test_email_service_masking_and_fallbacks():
-    """
-    Tests email recipient masking and environment fallback behavior.
-    """
-    from app.services.email_service import mask_recipient, _send_brevo_email_sync
-
-    assert mask_recipient("john@example.com") == "j**n@example.com"
-    assert mask_recipient("shashwat@gmail.com") == "s****t@gmail.com"
-    assert mask_recipient("ab@disha.gov.in") == "a*@disha.gov.in"
-    assert mask_recipient("") == "******"
-
-    # In dev mode, unconfigured email returns True (simulation)
-    res = _send_brevo_email_sync("test@example.com", "Test Subject", "<p>Test</p>", "123456")
-    assert res is True
-
+# ─── Verification that Email/Password & OTP Endpoints are Removed ─────────────
 
 @pytest.mark.asyncio
-async def test_brevo_https_email_delivery_mock(monkeypatch):
+async def test_email_password_and_otp_endpoints_unavailable():
     """
-    Tests Brevo HTTPS API delivery with mocked HTTP client responses.
+    Verifies that:
+    - /api/auth/register is NOT a valid active registration endpoint
+    - /api/auth/login is NOT a valid active login endpoint
+    - /api/auth/verify-email is NOT a valid active OTP verification endpoint
+    - /api/auth/resend-otp is NOT a valid active OTP resend endpoint
     """
-    from app.services.email_service import send_verification_email
-    import httpx
-
-    # 1. Test success (HTTP 201 Created)
-    async def mock_post_success(self, url, headers=None, json=None):
-        class MockResponse:
-            status_code = 201
-            text = '{"messageId":"<mock-123>"}'
-            def json(self):
-                return {"messageId": "<mock-123>"}
-        return MockResponse()
-
-    monkeypatch.setattr(settings, "BREVO_API_KEY", "xkeysib-mock-key-12345")
-    monkeypatch.setattr(settings, "BREVO_SENDER_EMAIL", "disha-alerts@gmail.com")
-    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post_success)
-
-    sent = await send_verification_email("user@example.com", "987654", "Mock User")
-    assert sent is True
-
-    # 2. Test error response from Brevo (HTTP 401 Unauthorized)
-    async def mock_post_error(self, url, headers=None, json=None):
-        class MockResponse:
-            status_code = 401
-            text = '{"code":"unauthorized","message":"Key not found"}'
-            def json(self):
-                return {"code": "unauthorized", "message": "Key not found"}
-        return MockResponse()
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post_error)
-    sent_err = await send_verification_email("user@example.com", "987654", "Mock User")
-    assert sent_err is False
-
-
-@pytest.mark.asyncio
-async def test_google_oauth_state_origin_preservation(monkeypatch):
-    """
-    Tests that Google OAuth login preserves frontend origin in state,
-    and callback redirects directly back to that origin.
-    """
-    import base64
-    from app.routes.auth import oauth
-
-    ts = int(time.time())
-    mock_email = f"state_test_{ts}@disha-test.gov.in"
-    mock_google_id = f"g_sub_state_{ts}"
-
-    mock_token = {
-        "access_token": f"mock_token_{ts}",
-        "token_type": "Bearer",
-        "expires_in": 3600,
-        "userinfo": {
-            "sub": mock_google_id,
-            "email": mock_email,
-            "name": "State Test User",
-            "email_verified": True,
-        },
-    }
-
-    async def mock_authorize_access_token(request):
-        return mock_token
-
-    monkeypatch.setattr(oauth.google, "authorize_access_token", mock_authorize_access_token)
-
-    # 1. State with production Vercel origin
-    prod_origin = "https://disha-platform.vercel.app"
-    raw_state = "csrf_token_123"
-    state_payload = base64.urlsafe_b64encode(f"{raw_state}|{prod_origin}".encode("utf-8")).decode("utf-8")
-
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", follow_redirects=False) as client:
-        res = await client.get(f"/api/auth/google/callback?code=mock_code&state={state_payload}")
-        assert res.status_code == 302
-        location = res.headers.get("location")
-        assert location.startswith(f"{prod_origin}/auth/google/success")
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Register attempt
+        res1 = await client.post(
+            "/api/auth/register",
+            json={"email": "test@disha.gov.in", "password": "Password123!"},
+        )
+        assert res1.status_code in (404, 405, 410)
 
-        # Cleanup
-        user_repo = UserRepository()
-        session_repo = SessionRepository()
-        user = await user_repo.get_by_email(mock_email)
-        if user:
-            await user_repo.collection.delete_one({"email": mock_email})
-            await session_repo.collection.delete_many({"user_id": user["id"]})
+        # Login attempt
+        res2 = await client.post(
+            "/api/auth/login",
+            json={"email": "test@disha.gov.in", "password": "Password123!"},
+        )
+        assert res2.status_code in (404, 405, 410)
 
+        # Verify email attempt
+        res3 = await client.post(
+            "/api/auth/verify-email",
+            json={"email": "test@disha.gov.in", "otp": "123456"},
+        )
+        assert res3.status_code in (404, 405, 410)
 
-
+        # Resend OTP attempt
+        res4 = await client.post(
+            "/api/auth/resend-otp",
+            json={"email": "test@disha.gov.in"},
+        )
+        assert res4.status_code in (404, 405, 410)

@@ -2,7 +2,7 @@
 DISHA Platform - OTP Repository Layer
 Disaster Intelligence and Situational Hazard Awareness Platform
 
-Encapsulates database operations for verification OTPs.
+Encapsulates database operations for verification OTPs and pending registrations.
 """
 
 from datetime import datetime, timezone
@@ -36,9 +36,10 @@ class OTPRepository:
     async def create_otp(
         self,
         email: str,
-        user_id: str,
+        user_id: Optional[str],
         otp_hash: str,
         expires_at: datetime,
+        registration_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         clean_email = email.strip().lower()
         # Invalidate/cleanup old OTPs for this email first
@@ -47,12 +48,15 @@ class OTPRepository:
         now = datetime.now(timezone.utc)
         doc = {
             "email": clean_email,
-            "user_id": str(user_id),
+            "user_id": str(user_id) if user_id else None,
             "otp_hash": otp_hash,
             "expires_at": expires_at,
             "attempts": 0,
             "created_at": now,
         }
+        if registration_data:
+            doc["registration_data"] = registration_data
+
         result = await self.collection.insert_one(doc)
         doc["id"] = str(result.inserted_id)
         doc["_id"] = result.inserted_id
@@ -67,6 +71,40 @@ class OTPRepository:
             sort=[("created_at", -1)],
         )
         return self._format_otp(doc)
+
+    async def get_pending_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        clean_user = username.strip().lower()
+        now = datetime.now(timezone.utc)
+        doc = await self.collection.find_one(
+            {
+                "registration_data.username": clean_user,
+                "expires_at": {"$gte": now},
+            },
+            sort=[("created_at", -1)],
+        )
+        return self._format_otp(doc)
+
+    async def update_otp_code(
+        self,
+        email: str,
+        otp_hash: str,
+        expires_at: datetime,
+    ) -> Optional[Dict[str, Any]]:
+        clean_email = email.strip().lower()
+        now = datetime.now(timezone.utc)
+        result = await self.collection.find_one_and_update(
+            {"email": clean_email},
+            {
+                "$set": {
+                    "otp_hash": otp_hash,
+                    "expires_at": expires_at,
+                    "attempts": 0,
+                    "updated_at": now,
+                }
+            },
+            return_document=True,
+        )
+        return self._format_otp(result)
 
     async def increment_attempts(self, otp_id: str) -> int:
         try:
