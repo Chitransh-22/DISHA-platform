@@ -213,19 +213,11 @@ export const ReportIncidentPage = ({ onNavigate, isLoggedIn: propIsLoggedIn }) =
               <CheckCircle className="w-10 h-10 text-emerald-500" />
             </div>
             <h2 className="text-2xl font-bold text-slate-900 mb-1">Report Submitted!</h2>
-            <p className="text-slate-500 text-sm mb-4">Your incident has been logged and dispatched to the nearest response team.</p>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-6 py-3 inline-block mb-6">
+            <p className="text-slate-500 text-sm mb-6">Your incident report has been recorded successfully.</p>
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 inline-block mb-8">
               <span className="text-xs text-slate-400 font-medium">Report ID</span>
               <div className="text-lg font-bold text-[#ea580c] tracking-widest">{reportId}</div>
             </div>
-            <ul className="text-left text-sm space-y-3 mb-8">
-              {['Report received by DISHA', 'Nearest team notified', 'Estimated response in 15–30 min'].map((step, i) => (
-                <li key={i} className="flex items-center gap-3">
-                  <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
-                  <span className="text-slate-700">{step}</span>
-                </li>
-              ))}
-            </ul>
             <button
               id="report-another-btn"
               onClick={() => { setSubmitted(false); setEventType(''); setDescription(''); setImages([]); setErrors({}); }}
