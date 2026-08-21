@@ -115,7 +115,11 @@ async function fetchEndpointWithFallback(endpoint) {
   const urls = [];
 
   // 1. Primary configured base URL or relative endpoint
-  urls.push(`${baseUrl}${endpoint}`);
+  if (baseUrl) {
+    urls.push(`${baseUrl}${endpoint}`);
+  } else {
+    urls.push(endpoint);
+  }
 
   // 2. Local fallback if window is available
   if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && baseUrl !== '') {
@@ -130,7 +134,7 @@ async function fetchEndpointWithFallback(endpoint) {
   for (const url of urls) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
       const res = await fetch(url, { signal: controller.signal });
       clearTimeout(timeoutId);
       if (res && res.ok) {
@@ -149,6 +153,9 @@ async function fetchEndpointWithFallback(endpoint) {
  */
 export async function fetchRawAnalysisData() {
   const [
+    analysisDataRes,
+    analysisOverviewRes,
+    unifiedEventsRes,
     eqRes,
     sachetRes,
     newsRes,
@@ -157,158 +164,184 @@ export async function fetchRawAnalysisData() {
     sachetStats,
     newsStats,
   ] = await Promise.all([
+    fetchEndpointWithFallback('/api/analysis/data?limit=1000&time_window=all'),
+    fetchEndpointWithFallback('/api/analysis/overview'),
+    fetchEndpointWithFallback('/api/events?range=all'),
     fetchEndpointWithFallback('/api/earthquakes?limit=500&last_30_days_only=false'),
     fetchEndpointWithFallback('/api/sachet?limit=500&last_30_days_only=false'),
-    fetchEndpointWithFallback('/api/news/disasters?limit=200'),
-    fetchEndpointWithFallback('/api/news/rejected?limit=200'),
+    fetchEndpointWithFallback('/api/news/disasters?limit=500'),
+    fetchEndpointWithFallback('/api/news/rejected?limit=500'),
     fetchEndpointWithFallback('/api/earthquakes/stats'),
     fetchEndpointWithFallback('/api/sachet/stats'),
     fetchEndpointWithFallback('/api/news/stats'),
   ]);
 
-  const earthquakes = (eqRes && eqRes.earthquakes) || [];
-  const sachetAlerts = (sachetRes && sachetRes.alerts) || [];
-  const newsDisasters = (newsRes && newsRes.disasters) || [];
+  const earthquakes = (analysisDataRes && analysisDataRes.earthquakes) || (eqRes && eqRes.earthquakes) || [];
+  const sachetAlerts = (analysisDataRes && analysisDataRes.sachet_alerts) || (sachetRes && sachetRes.alerts) || [];
+  const newsDisasters = (analysisDataRes && analysisDataRes.disasters) || (newsRes && newsRes.disasters) || [];
   const rejectedItems = (rejectedRes && rejectedRes.rejected) || [];
 
   const unifiedEvents = [];
+  const seenIds = new Set();
 
-  // 1. Normalize real Earthquakes from NCS RISEQ
-  earthquakes.forEach((eq) => {
-    const mag = eq.magnitude || 4.0;
-    const detectedState = (eq.relevance_details?.detected_states && eq.relevance_details.detected_states[0]) || eq.state || eq.region || 'Regional';
-    
-    let sev = 'Moderate';
-    if (mag >= 6.0) sev = 'Critical';
-    else if (mag >= 4.5) sev = 'Severe';
-    else if (mag < 3.5) sev = 'Low';
+  // Helper to add unique events
+  const addEvent = (ev) => {
+    if (!ev || !ev.id) return;
+    if (!seenIds.has(ev.id)) {
+      seenIds.add(ev.id);
+      unifiedEvents.push(ev);
+    }
+  };
 
-    unifiedEvents.push({
-      id: eq.event_id || `ncs-${Math.random()}`,
-      title: `M${mag} Earthquake — ${eq.region || eq.location || 'Seismic Faultline'}`,
-      type: 'Earthquake',
-      severity: sev,
-      rawSeverity: sev,
-      magnitude: mag,
-      depth_km: eq.depth_km || 10,
-      state: detectedState,
-      location: eq.location || eq.region || 'Seismic Epicenter',
-      lat: typeof eq.latitude === 'number' ? eq.latitude : 28.0,
-      lng: typeof eq.longitude === 'number' ? eq.longitude : 77.0,
-      reportedAt: eq.origin_time || eq.created_at || new Date().toISOString(),
-      status: eq.status === 'Reviewed' ? 'Monitoring' : 'Active',
-      source: 'National Center for Seismology (NCS RISEQ)',
-      sourceType: 'NCS_RISEQ',
-      relevance: eq.relevance || 'INDIA',
-      rawDoc: eq,
-    });
-  });
+  // 1. Normalize real Earthquakes from NCS RISEQ (earthquakes collection)
+  if (Array.isArray(earthquakes)) {
+    earthquakes.forEach((eq) => {
+      const mag = eq.magnitude || 4.0;
+      const detectedState = (eq.relevance_details?.detected_states && eq.relevance_details.detected_states[0]) || eq.state || eq.region || 'Regional';
+      
+      let sev = 'Moderate';
+      if (mag >= 6.0) sev = 'Critical';
+      else if (mag >= 4.5) sev = 'Severe';
+      else if (mag < 3.5) sev = 'Low';
 
-  // 2. Normalize real Alerts from NDMA SACHET CAP
-  sachetAlerts.forEach((alert) => {
-    const rawType = (alert.disaster_type || alert.event || 'alert').toLowerCase();
-    let normType = 'Other';
-    if (rawType.includes('flood')) normType = 'Flood';
-    else if (rawType.includes('rain')) normType = 'Heavy Rain / Flood';
-    else if (rawType.includes('cyclone') || rawType.includes('wind')) normType = 'Cyclone';
-    else if (rawType.includes('landslide')) normType = 'Landslide';
-    else if (rawType.includes('fire')) normType = 'Fire';
-    else if (rawType.includes('lightning')) normType = 'Lightning';
-    else if (rawType.includes('heat') || rawType.includes('temp')) normType = 'Heatwave';
+      const eventId = eq.event_id || (eq._id ? String(eq._id) : `ncs-${Math.random()}`);
 
-    const rawSev = (alert.severity || 'Moderate').toLowerCase();
-    let normSev = 'Moderate';
-    if (rawSev.includes('extreme') || rawSev.includes('critical')) normSev = 'Critical';
-    else if (rawSev.includes('severe') || rawSev.includes('high')) normSev = 'Severe';
-    else if (rawSev.includes('minor') || rawSev.includes('low')) normSev = 'Low';
-
-    const stateName = alert.location?.state || alert.state || 'Assam';
-
-    unifiedEvents.push({
-      id: alert.event_id || alert.alert_id || `sachet-${Math.random()}`,
-      title: alert.headline || alert.title || `${normType} Alert in ${alert.location?.district || stateName}`,
-      type: normType,
-      severity: normSev,
-      rawSeverity: alert.severity || 'Moderate',
-      state: stateName,
-      location: alert.location?.district || alert.area_description || stateName,
-      lat: typeof alert.latitude === 'number' ? alert.latitude : 26.0,
-      lng: typeof alert.longitude === 'number' ? alert.longitude : 90.0,
-      reportedAt: alert.event_time || alert.sent_at || alert.published_at || new Date().toISOString(),
-      status: alert.is_active ? 'Active' : 'Contained',
-      source: 'NDMA SACHET CAP',
-      sourceType: 'NDMA_SACHET',
-      urgency: alert.urgency || 'Expected',
-      certainty: alert.certainty || 'Observed',
-      rawDoc: alert,
-    });
-  });
-
-  // 3. Normalize real Disasters from Google News Gemini AI Classifier
-  newsDisasters.forEach((news) => {
-    const rawType = (news.disaster_type || 'other').toLowerCase();
-    let normType = 'Other';
-    if (rawType.includes('flood')) normType = 'Flood';
-    else if (rawType.includes('rain')) normType = 'Heavy Rain / Flood';
-    else if (rawType.includes('landslide')) normType = 'Landslide';
-    else if (rawType.includes('cyclone')) normType = 'Cyclone';
-    else if (rawType.includes('fire')) normType = 'Fire';
-    else if (rawType.includes('earthquake')) normType = 'Earthquake';
-    else if (rawType.includes('cloudburst')) normType = 'Cloudburst';
-
-    const rawSev = (news.severity || 'medium').toLowerCase();
-    let normSev = 'Moderate';
-    if (rawSev === 'critical') normSev = 'Critical';
-    else if (rawSev === 'high' || rawSev === 'severe') normSev = 'Severe';
-    else if (rawSev === 'low') normSev = 'Low';
-
-    const stateName = news.location?.state || 'National';
-
-    unifiedEvents.push({
-      id: news.event_id || news.article_id || `news-${Math.random()}`,
-      title: news.title || `${normType} Emergency in ${news.location?.district || stateName}`,
-      type: normType,
-      severity: normSev,
-      rawSeverity: news.severity || 'medium',
-      state: stateName,
-      location: news.location?.district || news.location?.city || stateName,
-      lat: news.location?.latitude || news.location?.lat || 28.5,
-      lng: news.location?.longitude || news.location?.lon || 77.2,
-      reportedAt: news.processed_at || news.published_at || new Date().toISOString(),
-      status: news.status === 'active' ? 'Active' : 'Monitoring',
-      source: news.source ? `Verified News (${news.source})` : 'Verified News Intelligence',
-      sourceType: 'VERIFIED_NEWS',
-      confidence: news.confidence || 0.9,
-      evidence: news.evidence || [],
-      rawDoc: news,
-    });
-  });
-
-  // Fallback to pre-ingested verified records if network was unreachable
-  if (unifiedEvents.length === 0 && Array.isArray(DISASTER_INCIDENTS) && DISASTER_INCIDENTS.length > 0) {
-    DISASTER_INCIDENTS.forEach((item) => {
-      unifiedEvents.push({
-        id: item.id || `base-${Math.random()}`,
-        title: item.title || `${item.type} in ${item.state}`,
-        type: item.type || 'Other',
-        severity: item.severity || 'Moderate',
-        rawSeverity: item.severity || 'Moderate',
-        state: item.state || 'Assam',
-        location: item.location || item.state,
-        lat: item.lat || 26.0,
-        lng: item.lng || 90.0,
-        reportedAt: item.reportedAt || new Date().toISOString(),
-        status: item.status || 'Active',
-        source: item.source || 'DISHA Ingestion Feed',
-        sourceType: (item.source || '').includes('NCS') ? 'NCS_RISEQ' : (item.source || '').includes('SACHET') ? 'NDMA_SACHET' : 'VERIFIED_NEWS',
-        rawDoc: item,
+      addEvent({
+        id: eventId,
+        title: `M${mag} Earthquake — ${eq.region || eq.location || 'Seismic Faultline'}`,
+        type: 'Earthquake',
+        severity: sev,
+        rawSeverity: sev,
+        magnitude: mag,
+        depth_km: eq.depth_km || 10,
+        state: detectedState,
+        location: eq.location || eq.region || 'Seismic Epicenter',
+        lat: typeof eq.latitude === 'number' ? eq.latitude : 28.0,
+        lng: typeof eq.longitude === 'number' ? eq.longitude : 77.0,
+        reportedAt: eq.origin_time || eq.created_at || new Date().toISOString(),
+        status: eq.status === 'Reviewed' ? 'Monitoring' : 'Active',
+        source: 'National Center for Seismology (NCS RISEQ)',
+        sourceType: 'NCS_RISEQ',
+        relevance: eq.relevance || 'INDIA',
+        rawDoc: eq,
       });
+    });
+  }
+
+  // 2. Normalize real Alerts from NDMA SACHET CAP (sachet_alerts collection)
+  if (Array.isArray(sachetAlerts)) {
+    sachetAlerts.forEach((alert) => {
+      const rawType = (alert.disaster_type || alert.event || 'alert').toLowerCase();
+      let normType = 'Other';
+      if (rawType.includes('flood')) normType = 'Flood';
+      else if (rawType.includes('rain')) normType = 'Heavy Rain / Flood';
+      else if (rawType.includes('cyclone') || rawType.includes('wind')) normType = 'Cyclone';
+      else if (rawType.includes('landslide')) normType = 'Landslide';
+      else if (rawType.includes('fire')) normType = 'Fire';
+      else if (rawType.includes('lightning')) normType = 'Lightning';
+      else if (rawType.includes('heat') || rawType.includes('temp')) normType = 'Heatwave';
+
+      const rawSev = (alert.severity || 'Moderate').toLowerCase();
+      let normSev = 'Moderate';
+      if (rawSev.includes('extreme') || rawSev.includes('critical')) normSev = 'Critical';
+      else if (rawSev.includes('severe') || rawSev.includes('high')) normSev = 'Severe';
+      else if (rawSev.includes('minor') || rawSev.includes('low')) normSev = 'Low';
+
+      const stateName = alert.location?.state || alert.state || 'Assam';
+      const eventId = alert.event_id || alert.alert_id || (alert._id ? String(alert._id) : `sachet-${Math.random()}`);
+
+      addEvent({
+        id: eventId,
+        title: alert.headline || alert.title || `${normType} Alert in ${alert.location?.district || stateName}`,
+        type: normType,
+        severity: normSev,
+        rawSeverity: alert.severity || 'Moderate',
+        state: stateName,
+        location: alert.location?.district || alert.area_description || stateName,
+        lat: typeof alert.latitude === 'number' ? alert.latitude : 26.0,
+        lng: typeof alert.longitude === 'number' ? alert.longitude : 90.0,
+        reportedAt: alert.event_time || alert.sent_at || alert.published_at || new Date().toISOString(),
+        status: alert.is_active ? 'Active' : 'Contained',
+        source: 'NDMA SACHET CAP',
+        sourceType: 'NDMA_SACHET',
+        urgency: alert.urgency || 'Expected',
+        certainty: alert.certainty || 'Observed',
+        rawDoc: alert,
+      });
+    });
+  }
+
+  // 3. Normalize real Disasters from Google News Gemini AI Classifier (disaster_events collection)
+  if (Array.isArray(newsDisasters)) {
+    newsDisasters.forEach((news) => {
+      const rawType = (news.disaster_type || news.category || 'other').toLowerCase();
+      let normType = 'Other';
+      if (rawType.includes('flood')) normType = 'Flood';
+      else if (rawType.includes('rain')) normType = 'Heavy Rain / Flood';
+      else if (rawType.includes('landslide')) normType = 'Landslide';
+      else if (rawType.includes('cyclone')) normType = 'Cyclone';
+      else if (rawType.includes('fire')) normType = 'Fire';
+      else if (rawType.includes('earthquake')) normType = 'Earthquake';
+      else if (rawType.includes('cloudburst')) normType = 'Cloudburst';
+
+      const rawSev = (news.severity || 'medium').toLowerCase();
+      let normSev = 'Moderate';
+      if (rawSev === 'critical') normSev = 'Critical';
+      else if (rawSev === 'high' || rawSev === 'severe') normSev = 'Severe';
+      else if (rawSev === 'low') normSev = 'Low';
+
+      const stateName = news.location?.state || 'National';
+      const eventId = news.event_id || news.article_id || (news._id ? String(news._id) : `news-${Math.random()}`);
+
+      addEvent({
+        id: eventId,
+        title: news.title || `${normType} Emergency in ${news.location?.district || stateName}`,
+        type: normType,
+        severity: normSev,
+        rawSeverity: news.severity || 'medium',
+        state: stateName,
+        location: news.location?.district || news.location?.city || stateName,
+        lat: news.location?.latitude || news.location?.lat || 28.5,
+        lng: news.location?.longitude || news.location?.lon || 77.2,
+        reportedAt: news.processed_at || news.published_at || new Date().toISOString(),
+        status: news.status === 'active' ? 'Active' : 'Monitoring',
+        source: news.source ? `Verified News (${news.source})` : 'Verified News Intelligence',
+        sourceType: 'VERIFIED_NEWS',
+        confidence: news.confidence || 0.9,
+        evidence: news.evidence || [],
+        rawDoc: news,
+      });
+    });
+  }
+
+  // 4. Merge any additional events from unified events service
+  if (unifiedEventsRes && Array.isArray(unifiedEventsRes.events)) {
+    unifiedEventsRes.events.forEach((ev) => {
+      if (ev && ev.id && !seenIds.has(ev.id)) {
+        addEvent({
+          id: ev.id,
+          title: ev.title || `${ev.category || 'Disaster'} in ${ev.state || 'India'}`,
+          type: ev.category || 'Other',
+          severity: ev.severity || 'Moderate',
+          rawSeverity: ev.severity || 'Moderate',
+          state: ev.state || 'India',
+          location: ev.location || ev.state || 'India',
+          lat: typeof ev.latitude === 'number' ? ev.latitude : 28.0,
+          lng: typeof ev.longitude === 'number' ? ev.longitude : 77.0,
+          reportedAt: ev.datetime || ev.date || new Date().toISOString(),
+          status: ev.status || 'Active',
+          source: ev.source_label || ev.source || 'DISHA Ingestion Feed',
+          sourceType: (ev.source_type || ev.source || '').includes('NCS') ? 'NCS_RISEQ' : (ev.source_type || ev.source || '').includes('SACHET') ? 'NDMA_SACHET' : 'VERIFIED_NEWS',
+          rawDoc: ev,
+        });
+      }
     });
   }
 
   return {
     rawIncidents: unifiedEvents,
     dbStats: {
+      overview: analysisOverviewRes,
       earthquakeStats: eqStats,
       sachetStats: sachetStats,
       newsStats: newsStats,
@@ -322,7 +355,7 @@ export async function fetchRawAnalysisData() {
       rejected: rejectedItems.length,
       total: unifiedEvents.length,
     },
-    isLiveBackend: earthquakes.length > 0 || sachetAlerts.length > 0,
+    isLiveBackend: earthquakes.length > 0 || sachetAlerts.length > 0 || newsDisasters.length > 0,
     lastSyncTime: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
   };
 }

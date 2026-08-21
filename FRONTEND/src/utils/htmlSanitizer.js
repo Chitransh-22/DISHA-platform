@@ -17,6 +17,11 @@ const HTML_ENTITIES = {
   '&bull;': '•',
   '&mdash;': '—',
   '&ndash;': '–',
+  '&ldquo;': '"',
+  '&rdquo;': '"',
+  '&lsquo;': "'",
+  '&rsquo;': "'",
+  '&hellip;': '…',
 };
 
 /**
@@ -50,20 +55,26 @@ export function sanitizeNewsDescription(rawText) {
   // 1. Unescape HTML entities first so escaped tags like &lt;p&gt; are exposed
   let cleaned = unescapeHtml(rawText);
 
-  // 2. Remove script / style tags and their inner content
+  // 2. Remove script / style / iframe tags and their inner content
   cleaned = cleaned.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ');
   cleaned = cleaned.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ');
+  cleaned = cleaned.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, ' ');
 
   // 3. Convert anchor tags to inner text: <a ...>text</a> -> text
   cleaned = cleaned.replace(/<a\b[^>]*>(.*?)<\/a>/gi, '$1');
 
-  // 4. Strip all remaining HTML tags
+  // 4. Convert line breaks and paragraph closings to single space
+  cleaned = cleaned.replace(/<br\s*\/?>/gi, ' ');
+  cleaned = cleaned.replace(/<\/p>/gi, ' ');
+  cleaned = cleaned.replace(/<\/div>/gi, ' ');
+
+  // 5. Strip all remaining HTML tags
   cleaned = cleaned.replace(/<[^>]+>/g, ' ');
 
-  // 5. Unescape again in case double-escaped entities existed
+  // 6. Unescape again in case double-escaped entities existed
   cleaned = unescapeHtml(cleaned);
 
-  // 6. Collapse consecutive whitespace and trim
+  // 7. Collapse consecutive whitespace and trim
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
   return cleaned;

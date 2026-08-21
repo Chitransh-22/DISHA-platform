@@ -66,7 +66,7 @@ export const GraphsAnalyticsPage = ({ onNavigate }) => {
   }, [filteredIncidents, rawData.rawIncidents, rawData.dbStats]);
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col selection:bg-orange-500 selection:text-white relative overflow-hidden font-sans">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col selection:bg-orange-500 selection:text-white relative overflow-x-clip font-sans">
       {/* Subtle Background Pattern */}
       <div className="fixed inset-0 bg-grid-slate pointer-events-none opacity-40 z-0" />
       <div className="fixed top-20 right-10 w-96 h-96 bg-orange-500/5 rounded-full blur-3xl pointer-events-none z-0" />

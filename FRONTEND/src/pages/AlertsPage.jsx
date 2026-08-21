@@ -15,10 +15,12 @@ import {
   ShieldCheck,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
 } from 'lucide-react';
 import { fetchEvents } from '../services/api';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../config/eventConfig';
 import { formatDateTimeIST } from '../utils/dateTime';
+import { normalizeEvent } from '../utils/eventNormalizer';
 import { CitySelector } from '../components/common/CitySelector';
 
 // Haversine formula to compute great-circle distance between two GPS coordinates in kilometers
@@ -99,10 +101,12 @@ export const AlertsPage = ({ onNavigate }) => {
     try {
       const data = await fetchEvents({ range: '30d' });
       if (data && Array.isArray(data.events)) {
-        // Deduplicate events by unique id/key
+        // Normalize each event and deduplicate by unique id/key
         const seen = new Set();
         const deduped = [];
-        for (const ev of data.events) {
+        for (const rawEv of data.events) {
+          const ev = normalizeEvent(rawEv);
+          if (!ev) continue;
           const key = ev.id || `${ev.latitude}_${ev.longitude}_${ev.title}`;
           if (!seen.has(key)) {
             seen.add(key);
@@ -451,11 +455,24 @@ export const AlertsPage = ({ onNavigate }) => {
                       
                       {/* Description */}
                       {alert.description && (
-                        <div>
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
-                            Situation Briefing
-                          </h4>
-                          <p className="text-xs sm:text-sm text-slate-700 leading-relaxed bg-white p-3.5 rounded-xl border border-slate-200/80">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <h4 className="font-bold uppercase tracking-wider text-slate-400">
+                              Situation Briefing
+                            </h4>
+                            {alert.source_url && (
+                              <a
+                                href={alert.source_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-orange-600 hover:text-orange-700 font-bold inline-flex items-center gap-1 hover:underline cursor-pointer"
+                              >
+                                <span>Read Source</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </div>
+                          <p className="text-xs sm:text-sm text-slate-700 leading-relaxed bg-white p-3.5 rounded-xl border border-slate-200/80 break-words">
                             {alert.description}
                           </p>
                         </div>
