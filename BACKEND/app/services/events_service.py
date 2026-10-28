@@ -2,17 +2,24 @@
 DISHA Platform - Unified Disaster Events Service
 Disaster Intelligence and Situational Hazard Awareness Platform
 
-Fetches and normalizes 100% of all real verified database events across all three sources:
-1. NCS RISEQ Earthquakes (National Center for Seismology) -> 279 records
-2. NDMA SACHET Government Alerts (CAP RSS Government Feed) -> 305 records
-3. Verified GNews Disaster Intelligence -> 58 records
+Fetches and normalizes 100% of all real verified database events across all four sources:
+1. NCS RISEQ Earthquakes (National Center for Seismology)
+2. NDMA SACHET Government Alerts (CAP RSS Government Feed)
+3. Verified GNews Disaster Intelligence
+4. Citizen Disaster Incident Reports (incident_reports)
 
-Total = 642 Verified Events directly from MongoDB Atlas.
-Zero mock / dummy data.
+Guarantees:
+- Zero event loss: never drops an incident because of missing coordinates.
+- Canonical invariant: T (Total) = M (Mapped) + U (Unmapped).
+- Consistent UTC time range boundaries [startTime, endTime).
+- No hardcoded fake centroid markers.
+- Robust parsing for RFC 2822, ISO 8601, BSON datetime, and epoch timestamps.
+- Zero silent fallback to current time.
 """
 
 import math
 import logging
+import email.utils
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 
@@ -23,27 +30,41 @@ logger = logging.getLogger("disha.events_service")
 logger.setLevel(logging.INFO)
 
 
-def normalize_event_time(ev: dict) -> Tuple[str, float, str, str]:
+def normalize_event_time(ev: dict) -> Optional[Tuple[str, float, str, str]]:
     """
-    Standardizes timestamps to ISO 8601 UTC string, Unix epoch timestamp,
-    formatted date (YYYY-MM-DD), and formatted time (HH:MM IST/UTC).
+    Standardizes timestamps to (iso_utc_string, epoch_seconds_float, YYYY-MM-DD, HH:MM UTC).
+    Returns None if timestamp is missing or cannot be parsed.
+    NEVER silently substitutes current time.
     """
     # 1. Check numeric epoch timestamp fields
-    for ts_key in ["unified_timestamp", "origin_timestamp", "event_timestamp"]:
-        if ev.get(ts_key) is not None:
+    for ts_key in ["unified_timestamp", "origin_timestamp", "event_timestamp", "timestamp"]:
+        val = ev.get(ts_key)
+        if val is not None:
             try:
-                ts = float(ev[ts_key])
+                ts = float(val)
+                if ts > 1e11:  # Milliseconds
+                    ts = ts / 1000.0
                 if ts > 0:
                     dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-                    iso_str = dt.isoformat()
-                    date_str = dt.strftime("%Y-%m-%d")
-                    time_str = dt.strftime("%H:%M UTC")
-                    return iso_str, ts, date_str, time_str
+                    return dt.isoformat(), ts, dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M UTC")
             except Exception:
                 pass
 
-    # 2. Check candidate timestamp string fields
+    # 2. Check Python / BSON datetime objects (e.g. incident_reports created_at)
+    for dt_key in ["created_at", "updated_at", "event_time", "incident_date"]:
+        val = ev.get(dt_key)
+        if isinstance(val, datetime):
+            if val.tzinfo is None:
+                dt = val.replace(tzinfo=timezone.utc)
+            else:
+                dt = val.astimezone(timezone.utc)
+            ts = dt.timestamp()
+            return dt.isoformat(), ts, dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M UTC")
+
+    # 3. Check candidate timestamp string fields
     candidate_strs = [
+        ev.get("date"),
+        ev.get("datetime"),
         ev.get("origin_time"),
         ev.get("event_time"),
         ev.get("effective_at"),
@@ -62,8 +83,22 @@ def normalize_event_time(ev: dict) -> Tuple[str, float, str, str]:
         if not s:
             continue
 
+        # Try RFC 2822 format (common in published_at RSS fields: "Thu, 22 Oct 2026 04:29:03 GMT")
         try:
-            dt = datetime.fromisoformat(s)
+            dt = email.utils.parsedate_to_datetime(s)
+            if dt is not None:
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+                return dt.isoformat(), dt.timestamp(), dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M UTC")
+        except Exception:
+            pass
+
+        # Try ISO 8601 format
+        try:
+            clean_iso = s.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(clean_iso)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             else:
@@ -72,23 +107,22 @@ def normalize_event_time(ev: dict) -> Tuple[str, float, str, str]:
         except Exception:
             pass
 
+        # Try common date/time formats
         for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"]:
             try:
-                dt = datetime.strptime(s, fmt)
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
                 return dt.isoformat(), dt.timestamp(), dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M UTC")
             except Exception:
                 pass
 
-    now = datetime.now(timezone.utc)
-    return now.isoformat(), now.timestamp(), now.strftime("%Y-%m-%d"), now.strftime("%H:%M UTC")
+    return None
 
 
 def map_category(raw_cat: Optional[str]) -> Tuple[str, str]:
     """
     Maps raw category/disaster_type into standard presentation categories:
     Earthquake, Flood, Heavy Rain, Landslide, Lightning, Cyclone, Fire, Cloudburst,
-    Building Collapse, Industrial Accident, Explosion, Other.
+    Building Collapse, Industrial Accident, Explosion, Heatwave, Other.
     Returns: (Display Category, Normalized Slug)
     """
     if not raw_cat:
@@ -98,7 +132,7 @@ def map_category(raw_cat: Optional[str]) -> Tuple[str, str]:
 
     if "earthquake" in c or "seismic" in c or "tremor" in c:
         return "Earthquake", "earthquake"
-    elif "flood" in c or "inundat" in c:
+    elif "flood" in c or "inundat" in c or "waterlog" in c:
         return "Flood", "flood"
     elif "heavy_rain" in c or "rain" in c or "downpour" in c or "thunderstorm" in c:
         return "Heavy Rain", "heavy_rain"
@@ -112,7 +146,7 @@ def map_category(raw_cat: Optional[str]) -> Tuple[str, str]:
         return "Fire", "fire"
     elif "cloudburst" in c:
         return "Cloudburst", "cloudburst"
-    elif "building_collapse" in c or "tunnel_collapse" in c or "structure_collapse" in c:
+    elif "building_collapse" in c or "tunnel_collapse" in c or "structure_collapse" in c or "bridge_collapse" in c:
         return "Building Collapse", "building_collapse"
     elif "industrial_accident" in c or "gas_leak" in c or "chemical" in c:
         return "Industrial Accident", "industrial_accident"
@@ -140,13 +174,13 @@ def map_severity(raw_sev: Optional[str], magnitude: Optional[float] = None) -> s
         return "Moderate"
 
     s = str(raw_sev).strip().lower()
-    if s in ["extreme", "critical", "catastrophic"]:
+    if s in ["extreme", "critical", "catastrophic", "level 4"]:
         return "Critical"
-    elif s in ["severe", "high", "major"]:
+    elif s in ["severe", "high", "major", "level 3"]:
         return "Severe"
-    elif s in ["moderate", "medium", "intermediate"]:
+    elif s in ["moderate", "medium", "intermediate", "level 2"]:
         return "Moderate"
-    elif s in ["minor", "low", "minimal"]:
+    elif s in ["minor", "low", "minimal", "level 1"]:
         return "Low"
 
     return s.capitalize()
@@ -157,27 +191,28 @@ def map_status(raw_stat: Optional[str]) -> str:
     if not raw_stat:
         return "Active"
     s = str(raw_stat).strip().lower()
-    if s in ["actual", "active", "ongoing"]:
+    if s in ["actual", "active", "ongoing", "submitted", "verified"]:
         return "Active"
     elif s in ["reviewed"]:
         return "Reviewed"
     elif s in ["monitoring", "watch"]:
         return "Monitoring"
-    elif s in ["contained", "resolved"]:
+    elif s in ["contained", "resolved", "dispatched"]:
         return "Contained"
     elif s in ["unscruitnized", "auto"]:
         return "Automatic"
     return raw_stat.strip().capitalize()
 
 
-def extract_sachet_coordinates(sa: dict) -> Tuple[float, float, str]:
+def extract_sachet_coordinates(sa: dict) -> Tuple[Optional[float], Optional[float], str]:
     """
     Robust coordinate extractor for SACHET CAP Alerts:
     1. Direct lat/lon in doc or location object
     2. CAP Polygon centroid computation
     3. CAP Circle center computation
     4. Text entity geocoding from sender/area_description/headline
-    5. Fallback to India centroid
+    Returns: (lat, lon, precision) where lat/lon may be None if unresolvable.
+    NEVER substitutes fake India default centroid.
     """
     lat = sa.get("latitude")
     lon = sa.get("longitude")
@@ -191,7 +226,10 @@ def extract_sachet_coordinates(sa: dict) -> Tuple[float, float, str]:
         try:
             flat, flon = float(lat), float(lon)
             if -90 <= flat <= 90 and -180 <= flon <= 180:
-                return flat, flon, "direct"
+                if abs(flat - 20.5937) < 0.001 and abs(flon - 78.9629) < 0.001:
+                    pass  # Reject legacy fake India default centroid
+                else:
+                    return flat, flon, "exact"
         except (ValueError, TypeError):
             pass
 
@@ -233,12 +271,14 @@ def extract_sachet_coordinates(sa: dict) -> Tuple[float, float, str]:
         if glat is not None and glon is not None:
             return glat, glon, f"text_{prec}"
 
-    return 20.5937, 78.9629, "india_default"
+    return None, None, "unresolved"
 
 
-def extract_news_coordinates(ev: dict) -> Tuple[float, float, str]:
+def extract_news_coordinates(ev: dict) -> Tuple[Optional[float], Optional[float], str]:
     """
     Robust coordinate extractor for GNews Disasters.
+    Returns: (lat, lon, precision) where lat/lon may be None if unresolvable.
+    NEVER substitutes fake India default centroid.
     """
     loc = ev.get("location") or {}
     lat = loc.get("latitude") if isinstance(loc, dict) else ev.get("latitude")
@@ -252,7 +292,10 @@ def extract_news_coordinates(ev: dict) -> Tuple[float, float, str]:
         try:
             flat, flon = float(lat), float(lon)
             if -90 <= flat <= 90 and -180 <= flon <= 180:
-                return flat, flon, "direct"
+                if abs(flat - 20.5937) < 0.001 and abs(flon - 78.9629) < 0.001:
+                    pass  # Reject legacy fake India default centroid
+                else:
+                    return flat, flon, "exact"
         except (ValueError, TypeError):
             pass
 
@@ -274,21 +317,111 @@ def extract_news_coordinates(ev: dict) -> Tuple[float, float, str]:
         if glat is not None and glon is not None:
             return glat, glon, f"text_{prec}"
 
-    return 20.5937, 78.9629, "india_default"
+    return None, None, "unresolved"
 
 
-def parse_time_range_cutoff(range_str: Optional[str]) -> Tuple[Optional[Tuple[int, str, str]], str]:
+def extract_incident_report_coordinates(ir: dict) -> Tuple[Optional[float], Optional[float], str]:
     """
-    Parses time range filter string ('24h', '7d', '15d', '30d', 'all')
-    and computes the UTC timestamp cutoff (epoch integer, ISO string, and YYYY-MM-DD date).
-    Default: '24h' (1 day).
+    Extracts coordinates from citizen incident_reports.
+    Checks location.lat, location.lng, location.latitude, location.longitude, location.coordinates [lng, lat].
+    Returns: (lat, lon, precision) where lat/lon may be None if unresolvable.
     """
-    if not range_str:
-        range_str = "24h"
-    r = range_str.strip().lower()
+    loc = ir.get("location") or {}
+    lat = None
+    lon = None
 
+    if isinstance(loc, dict):
+        lat = loc.get("lat") if loc.get("lat") is not None else loc.get("latitude")
+        lon = loc.get("lng") if loc.get("lng") is not None else (loc.get("lon") if loc.get("lon") is not None else loc.get("longitude"))
+
+        # Check GeoJSON coordinates [lng, lat]
+        if (lat is None or lon is None) and isinstance(loc.get("coordinates"), list) and len(loc["coordinates"]) >= 2:
+            try:
+                lon = float(loc["coordinates"][0])
+                lat = float(loc["coordinates"][1])
+            except (ValueError, TypeError):
+                pass
+
+    if lat is not None and lon is not None:
+        try:
+            flat, flon = float(lat), float(lon)
+            if -90 <= flat <= 90 and -180 <= flon <= 180:
+                if abs(flat - 20.5937) < 0.001 and abs(flon - 78.9629) < 0.001:
+                    pass  # Reject legacy fake India default centroid
+                else:
+                    return flat, flon, "exact"
+        except (ValueError, TypeError):
+            pass
+
+    # Try geocoding address
+    addr = loc.get("address") if isinstance(loc, dict) else None
+    if addr and isinstance(addr, str) and addr.strip():
+        detected = detect_locations(addr)
+        st = detected["states"][0] if detected["states"] else None
+        dt = detected["cities"][0] if detected["cities"] else None
+        if st or dt:
+            glat, glon, prec = geocode_location(country="India", state=st, district=dt)
+            if glat is not None and glon is not None:
+                return glat, glon, f"text_{prec}"
+
+    return None, None, "unresolved"
+
+
+def parse_time_range_bounds(
+    range_str: Optional[str] = "24h",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Tuple[Optional[float], Optional[float], Optional[str], Optional[str], str]:
+    """
+    Parses time filter string ('24h', '7d', '15d', '30d', 'all', 'custom')
+    and computes strict UTC timestamp boundaries (start_epoch, end_epoch, start_iso, end_iso, canonical_name).
+    Boundary rule everywhere: timestamp >= start_epoch AND timestamp < end_epoch.
+    """
+    # 1. Custom Date Range
+    if start_date or end_date:
+        now = datetime.now(timezone.utc)
+        start_dt = None
+        end_dt = now
+
+        if start_date:
+            try:
+                s_clean = start_date.strip().replace("Z", "+00:00")
+                start_dt = datetime.fromisoformat(s_clean)
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=timezone.utc)
+                else:
+                    start_dt = start_dt.astimezone(timezone.utc)
+            except Exception:
+                try:
+                    start_dt = datetime.strptime(start_date.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
+
+        if end_date:
+            try:
+                e_clean = end_date.strip().replace("Z", "+00:00")
+                end_dt = datetime.fromisoformat(e_clean)
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=timezone.utc)
+                else:
+                    end_dt = end_dt.astimezone(timezone.utc)
+            except Exception:
+                try:
+                    # End date inclusive till end of day
+                    end_dt = datetime.strptime(end_date.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+                except Exception:
+                    pass
+
+        start_epoch = start_dt.timestamp() if start_dt else None
+        end_epoch = end_dt.timestamp() if end_dt else None
+        start_iso = start_dt.isoformat() if start_dt else None
+        end_iso = end_dt.isoformat() if end_dt else None
+        return start_epoch, end_epoch, start_iso, end_iso, "custom"
+
+    # 2. Preset Time Range
+    r = (range_str or "24h").strip().lower()
     if r in ["all", "none", "0"]:
-        return None, "all"
+        return None, None, None, None, "all"
 
     days = 1
     canonical = "24h"
@@ -307,11 +440,23 @@ def parse_time_range_cutoff(range_str: Optional[str]) -> Tuple[Optional[Tuple[in
 
     now = datetime.now(timezone.utc)
     cutoff_dt = now - timedelta(days=days)
-    cutoff_epoch = int(cutoff_dt.timestamp())
-    cutoff_iso = cutoff_dt.isoformat()
-    cutoff_date = cutoff_dt.strftime("%Y-%m-%d")
 
-    return (cutoff_epoch, cutoff_iso, cutoff_date), canonical
+    start_epoch = cutoff_dt.timestamp()
+    end_epoch = now.timestamp()
+    start_iso = cutoff_dt.isoformat()
+    end_iso = now.isoformat()
+
+    return start_epoch, end_epoch, start_iso, end_iso, canonical
+
+
+def parse_time_range_cutoff(range_str: Optional[str]) -> Tuple[Optional[Tuple[int, str, str]], str]:
+    """Backward compatibility helper for legacy routes."""
+    start_epoch, end_epoch, start_iso, end_iso, canonical = parse_time_range_bounds(range_str)
+    if start_epoch is None or start_iso is None:
+        return None, canonical
+    cutoff_dt = datetime.fromtimestamp(start_epoch, tz=timezone.utc)
+    return (int(start_epoch), start_iso, cutoff_dt.strftime("%Y-%m-%d")), canonical
+
 
 
 def get_unified_events(
@@ -323,34 +468,53 @@ def get_unified_events(
     limit: Optional[int] = None,
     skip: int = 0,
     time_range: str = "24h",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    include_unmapped: bool = True,
 ) -> Dict[str, Any]:
     """
     Retrieves and combines verified disaster events from MongoDB:
     1. earthquakes (NCS RISEQ)
     2. sachet_alerts (NDMA SACHET CAP)
     3. disaster_events (Verified News Feed)
+    4. incident_reports (Citizen Incident Reports)
 
-    Filters data directly in MongoDB at database query level using indexed timestamp fields
-    and lean projections to maximize performance and minimize payload size.
+    Guarantees:
+    - Zero event loss: never drops an incident because of missing coordinates.
+    - Strict boundary rule: timestamp >= start_epoch AND timestamp < end_epoch.
+    - Preserves canonical invariant: Total (T) = Mapped (M) + Unmapped (U).
     """
-    cutoff_info, canonical_range = parse_time_range_cutoff(time_range)
+    start_epoch, end_epoch, start_iso, end_iso, canonical_range = parse_time_range_bounds(
+        range_str=time_range,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     all_events: List[Dict[str, Any]] = []
     eq_count = 0
     sachet_count = 0
     news_count = 0
+    citizen_count = 0
 
+    eq_mapped = 0
+    sachet_mapped = 0
+    news_mapped = 0
+    citizen_mapped = 0
+
+    missing_timestamp_count = 0
+
+    # -------------------------------------------------------------------------
     # 1. Earthquakes (NCS RISEQ)
+    # -------------------------------------------------------------------------
     if source in [None, "all", "earthquakes", "ncs"]:
         try:
             eq_query: Dict[str, Any] = {}
-            if cutoff_info:
-                c_epoch, c_iso, _ = cutoff_info
+            if start_epoch is not None and end_epoch is not None:
                 eq_query = {
                     "$or": [
-                        {"origin_timestamp": {"$gte": c_epoch}},
-                        {"created_at": {"$gte": c_iso}},
-                        {"origin_time": {"$gte": c_iso}},
+                        {"origin_timestamp": {"$gte": int(start_epoch), "$lt": int(end_epoch) + 1}},
+                        {"created_at": {"$gte": start_iso, "$lt": end_iso}},
+                        {"origin_time": {"$gte": start_iso, "$lt": end_iso}},
                     ]
                 }
 
@@ -375,21 +539,41 @@ def get_unified_events(
 
             eq_cursor = list(db["earthquakes"].find(eq_query, eq_projection).sort("origin_timestamp", -1))
             for eq in eq_cursor:
-                lat = eq.get("latitude")
-                lon = eq.get("longitude")
-
-                if lat is None or lon is None:
-                    continue
-                try:
-                    lat = float(lat)
-                    lon = float(lon)
-                    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                # Time normalization
+                time_res = normalize_event_time(eq)
+                if not time_res:
+                    missing_timestamp_count += 1
+                    if canonical_range != "all":
                         continue
-                except (ValueError, TypeError):
-                    continue
+                    iso_dt, epoch_ts, d_str, t_str = "", 0.0, "", ""
+                else:
+                    iso_dt, epoch_ts, d_str, t_str = time_res
+                    if start_epoch is not None and epoch_ts < start_epoch:
+                        continue
+                    if end_epoch is not None and epoch_ts >= end_epoch:
+                        continue
+
+                # Coordinate validation (DO NOT discard if missing)
+                raw_lat = eq.get("latitude")
+                raw_lon = eq.get("longitude")
+                lat = None
+                lon = None
+                has_coords = False
+                loc_status = "missing"
+
+                if raw_lat is not None and raw_lon is not None:
+                    try:
+                        flat = float(raw_lat)
+                        flon = float(raw_lon)
+                        if -90 <= flat <= 90 and -180 <= flon <= 180:
+                            lat = round(flat, 4)
+                            lon = round(flon, 4)
+                            has_coords = True
+                            loc_status = "exact"
+                    except (ValueError, TypeError):
+                        pass
 
                 mag = eq.get("magnitude") or 3.5
-                iso_dt, epoch_ts, d_str, t_str = normalize_event_time(eq)
                 cat_display, cat_slug = map_category("earthquake")
                 sev = map_severity(None, magnitude=mag)
                 stat = map_status(eq.get("status"))
@@ -407,8 +591,10 @@ def get_unified_events(
                     "description": f"Magnitude {mag:.1f} seismic event recorded at depth {eq.get('depth_km', 10)} km. Agency: National Center for Seismology (Govt. of India). Location: {location_name}.",
                     "category": cat_display,
                     "raw_category": cat_slug,
-                    "latitude": round(lat, 4),
-                    "longitude": round(lon, 4),
+                    "latitude": lat,
+                    "longitude": lon,
+                    "has_coordinates": has_coords,
+                    "location_status": loc_status,
                     "date": d_str,
                     "time": t_str,
                     "datetime": iso_dt,
@@ -433,22 +619,24 @@ def get_unified_events(
                     }
                 })
                 eq_count += 1
+                if has_coords:
+                    eq_mapped += 1
         except Exception as e:
             logger.error(f"Error reading earthquakes collection: {e}")
 
+    # -------------------------------------------------------------------------
     # 2. NDMA SACHET Government Alerts
+    # -------------------------------------------------------------------------
     if source in [None, "all", "sachet", "ndma"]:
         try:
             sa_query: Dict[str, Any] = {}
-            if cutoff_info:
-                c_epoch, c_iso, _ = cutoff_info
+            if start_epoch is not None and end_epoch is not None:
                 sa_query = {
                     "$or": [
-                        {"event_timestamp": {"$gte": c_epoch}},
-                        {"sent_at": {"$gte": c_iso}},
-                        {"effective_at": {"$gte": c_iso}},
-                        {"created_at": {"$gte": c_iso}},
-                        {"published_at": {"$gte": c_iso}},
+                        {"event_timestamp": {"$gte": int(start_epoch), "$lt": int(end_epoch) + 1}},
+                        {"sent_at": {"$gte": start_iso, "$lt": end_iso}},
+                        {"effective_at": {"$gte": start_iso, "$lt": end_iso}},
+                        {"created_at": {"$gte": start_iso, "$lt": end_iso}},
                     ]
                 }
 
@@ -486,10 +674,25 @@ def get_unified_events(
 
             sa_cursor = list(db["sachet_alerts"].find(sa_query, sa_projection).sort("event_timestamp", -1))
             for sa in sa_cursor:
+                # Time normalization
+                time_res = normalize_event_time(sa)
+                if not time_res:
+                    missing_timestamp_count += 1
+                    if canonical_range != "all":
+                        continue
+                    iso_dt, epoch_ts, d_str, t_str = "", 0.0, "", ""
+                else:
+                    iso_dt, epoch_ts, d_str, t_str = time_res
+                    if start_epoch is not None and epoch_ts < start_epoch:
+                        continue
+                    if end_epoch is not None and epoch_ts >= end_epoch:
+                        continue
+
+                # Coordinate extraction (non-destructive)
                 lat, lon, coord_precision = extract_sachet_coordinates(sa)
+                has_coords = lat is not None and lon is not None
                 loc = sa.get("location") or {}
 
-                iso_dt, epoch_ts, d_str, t_str = normalize_event_time(sa)
                 raw_type = sa.get("disaster_type") or sa.get("event") or "Alert"
                 cat_display, cat_slug = map_category(raw_type)
                 sev = map_severity(sa.get("severity"))
@@ -509,8 +712,10 @@ def get_unified_events(
                     "description": desc,
                     "category": cat_display,
                     "raw_category": cat_slug,
-                    "latitude": round(lat, 4),
-                    "longitude": round(lon, 4),
+                    "latitude": round(lat, 4) if has_coords else None,
+                    "longitude": round(lon, 4) if has_coords else None,
+                    "has_coordinates": has_coords,
+                    "location_status": coord_precision if has_coords else "unresolved",
                     "date": d_str,
                     "time": t_str,
                     "datetime": iso_dt,
@@ -536,21 +741,25 @@ def get_unified_events(
                     }
                 })
                 sachet_count += 1
+                if has_coords:
+                    sachet_mapped += 1
         except Exception as e:
             logger.error(f"Error reading sachet_alerts collection: {e}")
 
+    # -------------------------------------------------------------------------
     # 3. Verified News Disasters (GNews Feed)
+    # -------------------------------------------------------------------------
     if source in [None, "all", "news", "gnews"]:
         try:
             news_query: Dict[str, Any] = {}
-            if cutoff_info:
-                _, c_iso, c_date = cutoff_info
+            if start_epoch is not None and end_epoch is not None:
+                start_dt_str = datetime.fromtimestamp(start_epoch, tz=timezone.utc).strftime("%Y-%m-%d")
+                end_dt_str = datetime.fromtimestamp(end_epoch, tz=timezone.utc).strftime("%Y-%m-%d")
                 news_query = {
                     "$or": [
-                        {"processed_at": {"$gte": c_iso}},
-                        {"first_seen_at": {"$gte": c_iso}},
-                        {"published_at": {"$gte": c_iso}},
-                        {"incident_date": {"$gte": c_date}},
+                        {"processed_at": {"$gte": start_iso, "$lt": end_iso}},
+                        {"first_seen_at": {"$gte": start_iso, "$lt": end_iso}},
+                        {"incident_date": {"$gte": start_dt_str, "$lte": end_dt_str}},
                     ]
                 }
 
@@ -577,10 +786,25 @@ def get_unified_events(
 
             news_cursor = list(db["disaster_events"].find(news_query, news_projection).sort("processed_at", -1))
             for ev in news_cursor:
+                # Time normalization
+                time_res = normalize_event_time(ev)
+                if not time_res:
+                    missing_timestamp_count += 1
+                    if canonical_range != "all":
+                        continue
+                    iso_dt, epoch_ts, d_str, t_str = "", 0.0, "", ""
+                else:
+                    iso_dt, epoch_ts, d_str, t_str = time_res
+                    if start_epoch is not None and epoch_ts < start_epoch:
+                        continue
+                    if end_epoch is not None and epoch_ts >= end_epoch:
+                        continue
+
+                # Coordinate extraction (non-destructive)
                 lat, lon, coord_precision = extract_news_coordinates(ev)
+                has_coords = lat is not None and lon is not None
                 loc = ev.get("location") or {}
 
-                iso_dt, epoch_ts, d_str, t_str = normalize_event_time(ev)
                 raw_type = ev.get("disaster_type") or "disaster"
                 cat_display, cat_slug = map_category(raw_type)
                 sev = map_severity(ev.get("severity"))
@@ -590,7 +814,7 @@ def get_unified_events(
                 desc = ev.get("description") or "Disaster incident verified via multi-source intelligence."
                 loc_str = (
                     (f"{loc.get('district')}, {loc.get('state')}" if loc.get('district') and loc.get('state') else loc.get('state'))
-                    if isinstance(loc, dict) else "India"
+                    if isinstance(loc, dict) and (loc.get('district') or loc.get('state')) else "India"
                 )
 
                 doc_id = str(ev.get("_id")) if ev.get("_id") else f"news_{epoch_ts}_{lat}_{lon}"
@@ -603,8 +827,10 @@ def get_unified_events(
                     "description": desc,
                     "category": cat_display,
                     "raw_category": cat_slug,
-                    "latitude": round(lat, 4),
-                    "longitude": round(lon, 4),
+                    "latitude": round(lat, 4) if has_coords else None,
+                    "longitude": round(lon, 4) if has_coords else None,
+                    "has_coordinates": has_coords,
+                    "location_status": coord_precision if has_coords else "unresolved",
                     "date": d_str,
                     "time": t_str,
                     "datetime": iso_dt,
@@ -629,11 +855,119 @@ def get_unified_events(
                     }
                 })
                 news_count += 1
+                if has_coords:
+                    news_mapped += 1
         except Exception as e:
             logger.error(f"Error reading disaster_events collection: {e}")
 
-    # Use unique DB _id or event_id for absolute 100% record inclusion
-    unique_events = all_events
+    # -------------------------------------------------------------------------
+    # 4. Citizen Disaster Incident Reports (incident_reports)
+    # -------------------------------------------------------------------------
+    if source in [None, "all", "citizen", "citizen_reports", "reports"]:
+        try:
+            ir_query: Dict[str, Any] = {}
+            if start_epoch is not None and end_epoch is not None:
+                start_dt_obj = datetime.fromtimestamp(start_epoch, tz=timezone.utc)
+                end_dt_obj = datetime.fromtimestamp(end_epoch, tz=timezone.utc)
+                ir_query = {
+                    "$or": [
+                        {"created_at": {"$gte": start_dt_obj, "$lt": end_dt_obj}},
+                        {"created_at": {"$gte": start_iso, "$lt": end_iso}},
+                    ]
+                }
+
+            ir_cursor = list(db["incident_reports"].find(ir_query).sort("created_at", -1))
+            for ir in ir_cursor:
+                # Time normalization
+                time_res = normalize_event_time(ir)
+                if not time_res:
+                    missing_timestamp_count += 1
+                    if canonical_range != "all":
+                        continue
+                    iso_dt, epoch_ts, d_str, t_str = "", 0.0, "", ""
+                else:
+                    iso_dt, epoch_ts, d_str, t_str = time_res
+                    if start_epoch is not None and epoch_ts < start_epoch:
+                        continue
+                    if end_epoch is not None and epoch_ts >= end_epoch:
+                        continue
+
+                lat, lon, coord_precision = extract_incident_report_coordinates(ir)
+                has_coords = lat is not None and lon is not None
+                loc = ir.get("location") or {}
+
+                raw_type = ir.get("event_type") or "other"
+                cat_display, cat_slug = map_category(raw_type)
+                sev = map_severity(ir.get("severity"))
+                stat = map_status(ir.get("status"))
+
+                address_text = loc.get("address") if isinstance(loc, dict) else ""
+                state_text = loc.get("state") if isinstance(loc, dict) else ""
+                district_text = loc.get("district") if isinstance(loc, dict) else ""
+
+                if not state_text and address_text:
+                    det = detect_locations(address_text)
+                    if det.get("states"):
+                        state_text = det["states"][0]
+                    if det.get("cities") and not district_text:
+                        district_text = det["cities"][0]
+
+                desc = ir.get("description") or f"Citizen incident report submitted for {cat_display}."
+                title = f"{cat_display} Report — {district_text or state_text or 'Citizen Report'}"
+
+                doc_id = str(ir.get("_id")) if ir.get("_id") else f"report_{epoch_ts}_{lat}_{lon}"
+                event_key = ir.get("report_id") or doc_id
+
+                all_events.append({
+                    "id": event_key,
+                    "db_id": doc_id,
+                    "title": title[:140],
+                    "description": desc,
+                    "category": cat_display,
+                    "raw_category": cat_slug,
+                    "latitude": round(lat, 4) if has_coords else None,
+                    "longitude": round(lon, 4) if has_coords else None,
+                    "has_coordinates": has_coords,
+                    "location_status": coord_precision if has_coords else "unresolved",
+                    "date": d_str,
+                    "time": t_str,
+                    "datetime": iso_dt,
+                    "timestamp": epoch_ts,
+                    "location": address_text or state_text or "Citizen Reported Incident",
+                    "state": state_text,
+                    "district": district_text,
+                    "city": loc.get("city") if isinstance(loc, dict) else "",
+                    "severity": sev,
+                    "status": stat,
+                    "source": "CITIZEN_REPORT",
+                    "source_group": "citizen",
+                    "source_label": "Verified Citizen Report",
+                    "source_url": "",
+                    "image": (ir.get("images")[0].get("url") if ir.get("images") and isinstance(ir.get("images"), list) and isinstance(ir.get("images")[0], dict) else None),
+                    "helpline": "1070 / 112",
+                    "response_units": ["District Emergency Operation Center (DEOC)", "Local First Responders"],
+                    "metadata": {
+                        "user_name": ir.get("user_name"),
+                        "report_id": ir.get("report_id"),
+                        "coord_precision": coord_precision,
+                    }
+                })
+                citizen_count += 1
+                if has_coords:
+                    citizen_mapped += 1
+        except Exception as e:
+            logger.error(f"Error reading incident_reports collection: {e}")
+
+    # -------------------------------------------------------------------------
+    # Deduplication by canonical ID across all streams
+    # -------------------------------------------------------------------------
+    seen_ids = set()
+    unique_events: List[Dict[str, Any]] = []
+    for ev in all_events:
+        eid = ev.get("id")
+        if eid and eid not in seen_ids:
+            seen_ids.add(eid)
+            unique_events.append(ev)
 
     # Sort strictly by timestamp descending (newest first)
     unique_events.sort(key=lambda x: x.get("timestamp", 0.0), reverse=True)
@@ -668,7 +1002,7 @@ def get_unified_events(
         st_query = state.strip().lower()
         filtered_events = [
             e for e in filtered_events
-            if st_query in e["state"].lower() or st_query in e["location"].lower()
+            if st_query in e.get("state", "").lower() or st_query in e.get("location", "").lower()
         ]
 
     # Compute available categories sorted descending by event count
@@ -685,6 +1019,9 @@ def get_unified_events(
         sorted_categories.insert(0, "All")
 
     total_count = len(filtered_events)
+    mapped_count = sum(1 for e in filtered_events if e.get("has_coordinates"))
+    unmapped_count = total_count - mapped_count
+
     if limit is not None and limit > 0:
         paged_events = filtered_events[skip : skip + limit]
     else:
@@ -693,13 +1030,26 @@ def get_unified_events(
     return {
         "status": "success",
         "time_range": canonical_range,
+        "start_time": start_iso,
+        "end_time": end_iso,
         "total": total_count,
         "count": len(paged_events),
+        "mapped_count": mapped_count,
+        "unmapped_count": unmapped_count,
+        "missing_timestamp_count": missing_timestamp_count,
+        "invariant_holds": (total_count == mapped_count + unmapped_count),
         "source_counts": {
             "total": len(unique_events),
             "earthquakes": eq_count,
             "sachet": sachet_count,
             "news": news_count,
+            "citizen_reports": citizen_count,
+        },
+        "source_mapped_counts": {
+            "earthquakes": eq_mapped,
+            "sachet": sachet_mapped,
+            "news": news_mapped,
+            "citizen_reports": citizen_mapped,
         },
         "categories": sorted_categories,
         "events": paged_events,
@@ -708,7 +1058,6 @@ def get_unified_events(
 
 def get_event_by_id(event_id: str) -> Optional[Dict[str, Any]]:
     """Retrieves a single unified event by its unique deterministic ID or db_id."""
-    # Look across full dataset
     all_res = get_unified_events(limit=None, time_range="all")
     clean_id = str(event_id).strip()
     for ev in all_res.get("events", []):

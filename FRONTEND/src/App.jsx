@@ -12,6 +12,7 @@ import { NewsDetailPage } from './pages/NewsDetailPage';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { NotificationToast } from './components/common/NotificationToast';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { TimeRangeProvider } from './context/TimeRangeContext';
 
 function AppContent() {
   const [currentPage, setCurrentPage] = useState('landing');
@@ -130,7 +131,9 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <TimeRangeProvider>
+        <AppContent />
+      </TimeRangeProvider>
     </AuthProvider>
   );
 }

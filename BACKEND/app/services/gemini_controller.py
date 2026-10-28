@@ -1,3 +1,4 @@
+from app.services.gemini_quota_manager import quota_manager
 """
 DISHA Gemini Quota Controller & AI Verification Service
 Enforces strict rate-limiting, daily quota preservation, backoff retries,
@@ -236,6 +237,7 @@ def call_gemini_api(payload: Dict[str, Any], max_retries: int = 3) -> Optional[s
                 continue
 
             if response.status_code == 429:
+                quota_manager.record_failure(429, response.text)
                 rate_backoff = max(3.0, (1.5 ** attempt) + random.uniform(0.5, 2.0))
                 print(f"[GEMINI RATE LIMIT] [{active_model}] Attempt {attempt}/{max_retries}: Rate limit/quota reached. Trying fallback model after {rate_backoff:.2f}s...")
                 time.sleep(rate_backoff)
@@ -318,16 +320,17 @@ def validate_and_retry_gemini_batch(
         if not current_batch:
             break
 
-        if not quota_controller.can_make_request():
-            print("[GEMINI] Daily quota reached during batch processing.")
+        can_call, reason = quota_manager.can_call_ai(is_scheduled=True)
+        if not can_call:
+            print(f"[GEMINI] {reason}")
             break
 
-        quota_controller.wait_for_slot()
+        quota_manager.wait_for_slot()
         payload = {"articles": current_batch}
         raw_resp = call_gemini_api(payload)
         api_calls_made += 1
 
-        quota_controller.record_usage(
+        quota_manager.record_success(
             requests_count=1,
             articles_count=len(current_batch),
             estimated_tokens=len(str(payload)) // 4,

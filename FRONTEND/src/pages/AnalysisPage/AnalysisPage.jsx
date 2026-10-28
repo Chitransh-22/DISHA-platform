@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useTimeRange } from '../../context/TimeRangeContext';
 import { Navbar } from '../LandingPage/components/Navbar';
 import { Footer } from '../LandingPage/components/Footer';
 import { AnalysisHero } from './components/AnalysisHero';
@@ -36,41 +37,59 @@ export const AnalysisPage = ({ currentPage = 'analysis', onNavigate }) => {
   const [error, setError] = useState(null);
   const [showFullWorkspace, setShowFullWorkspace] = useState(false);
 
+  // Global Time Range from shared context
+  const { timeRange, setTimeRange, customRange } = useTimeRange();
+  const requestIdRef = useRef(0);
+
   // Global Filter State
   const [filters, setFilters] = useState({
-    timeWindow: 'all',
+    timeWindow: timeRange || 'all',
     disasterType: 'all',
     state: 'all',
     severity: 'all',
     dataSource: 'all',
   });
 
-  // Load raw data on mount
-  const loadData = async () => {
+  // Keep filters.timeWindow synchronized when global timeRange changes
+  useEffect(() => {
+    setFilters((prev) => (prev.timeWindow === timeRange ? prev : { ...prev, timeWindow: timeRange }));
+  }, [timeRange]);
+
+  // Load raw data synced with current canonical time range
+  const loadData = async (range = timeRange, custom = customRange) => {
+    const reqId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchRawAnalysisData();
-      if (data) {
+      const data = await fetchRawAnalysisData(range, custom);
+      if (reqId === requestIdRef.current && data) {
         setRawData(data);
       }
     } catch (err) {
-      console.error('[AnalysisPage] Data loading failure:', err);
-      setError('Unable to load latest disaster intelligence feed. Please retry.');
+      if (reqId === requestIdRef.current) {
+        console.error('[AnalysisPage] Data loading failure:', err);
+        setError('Unable to load latest disaster intelligence feed. Please retry.');
+      }
     } finally {
-      setLoading(false);
+      if (reqId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    loadData(timeRange, customRange);
+  }, [timeRange, customRange]);
 
   const handleFilterChange = (key, value) => {
+    if (key === 'timeWindow') {
+      setTimeRange(value);
+    }
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleResetFilters = () => {
+    setTimeRange('all');
     setFilters({
       timeWindow: 'all',
       disasterType: 'all',
@@ -115,7 +134,7 @@ export const AnalysisPage = ({ currentPage = 'analysis', onNavigate }) => {
         {/* SECTION 1: HERO HEADER */}
         <AnalysisHero
           lastSyncTime={rawData.lastSyncTime}
-          onRefresh={loadData}
+          onRefresh={() => loadData(timeRange, customRange)}
           loading={loading}
           isLive={rawData.isLiveBackend}
           totalEvents={analytics.kpis.totalEvents}

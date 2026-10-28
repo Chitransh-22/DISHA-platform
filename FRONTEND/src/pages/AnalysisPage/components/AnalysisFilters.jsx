@@ -85,6 +85,7 @@ export const AnalysisFilters = ({
             <option value="all">All Available Records</option>
             <option value="24h">Past 24 Hours</option>
             <option value="7d">Past 7 Days</option>
+            <option value="15d">Past 15 Days</option>
             <option value="30d">Rolling 30 Days</option>
           </select>
         </div>
@@ -164,6 +165,7 @@ export const AnalysisFilters = ({
             <option value="sachet">NDMA SACHET CAP Alerts</option>
             <option value="ncs">NCS RISEQ Seismology</option>
             <option value="news">Verified Multi-Source News</option>
+            <option value="citizen">Citizen Incident Reports</option>
           </select>
         </div>
       </div>

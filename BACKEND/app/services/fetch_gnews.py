@@ -44,6 +44,8 @@ from app.services.event_clustering import (
     generate_stable_event_id,
     find_matching_active_event,
 )
+from app.core.config import settings
+from app.services.gemini_quota_manager import quota_manager, compute_article_fingerprint
 from app.services.gemini_controller import (
     QuotaController,
     validate_and_retry_gemini_batch,
@@ -460,12 +462,12 @@ def get_existing_article_ids(article_ids: List[str]) -> Set[str]:
 
 def get_pending_ai_candidates(max_count: int = 50) -> List[Dict[str, Any]]:
     """
-    Retrieves pending AI candidates from news_temp for safe retry handling.
+    Retrieves pending and deferred AI candidates from news_temp for safe retry handling.
     """
     cursor = news_temp.find(
         {
-            "status": "pending_ai",
-            "retry_count": {"$lt": MAX_AI_RETRIES},
+            "status": {"$in": ["pending_ai", "deferred_quota"]},
+            "retry_count": {"$lt": settings.GEMINI_MAX_ATTEMPTS_PER_ARTICLE},
         }
     ).sort("fetched_at", -1).limit(max_count)
 
@@ -493,6 +495,13 @@ def save_temp_article(article: dict, filter_result: dict, quality_result: Option
 
     if "retry_count" not in article:
         article["retry_count"] = 0
+
+    article["fingerprint"] = compute_article_fingerprint(
+        article.get("title", ""),
+        article.get("description", ""),
+        article.get("url", ""),
+    )
+    article["prompt_version"] = settings.GEMINI_PROMPT_VERSION
 
     news_temp.update_one(
         {"_id": article["_id"]},
@@ -695,8 +704,15 @@ def fetch_gnews() -> dict:
         for i in range(0, len(gemini_candidates), GEMINI_BATCH_SIZE):
             batch = gemini_candidates[i : i + GEMINI_BATCH_SIZE]
 
-            if not quota_controller.can_make_request():
-                print("[GEMINI] Daily quota limit reached. Retaining remaining batch in pending_ai queue.")
+            can_call, reason = quota_manager.can_call_ai(is_scheduled=True)
+            if not can_call:
+                print(f"[GEMINI] {reason} Deferring remaining {len(gemini_candidates) - i} candidates to deferred_quota queue.")
+                now_iso = datetime.now(timezone.utc).isoformat()
+                for def_art in gemini_candidates[i:]:
+                    news_temp.update_one(
+                        {"_id": def_art["_id"]},
+                        {"$set": {"status": "deferred_quota", "deferred_reason": reason, "updated_at": now_iso}},
+                    )
                 break
 
             print(f"[GEMINI] Processing batch {i // GEMINI_BATCH_SIZE + 1} ({len(batch)} candidates)...")
@@ -978,13 +994,17 @@ def fetch_gnews() -> dict:
 
             # Handle unverified articles in batch
             unverified_ids = set(batch_map.keys()) - verified_ids
+            now_iso = datetime.now(timezone.utc).isoformat()
             for u_id in unverified_ids:
+                u_art = batch_map.get(u_id, {})
+                cur_retries = u_art.get("retry_count", 0) + 1
+                new_status = "failed" if cur_retries >= settings.GEMINI_MAX_ATTEMPTS_PER_ARTICLE else "pending_ai"
                 news_temp.update_one(
                     {"_id": u_id},
                     {
                         "$set": {
-                            "status": "pending_ai",
-                            "last_ai_attempt_at": datetime.now(timezone.utc).isoformat(),
+                            "status": new_status,
+                            "last_ai_attempt_at": now_iso,
                         },
                         "$inc": {"retry_count": 1},
                     },
