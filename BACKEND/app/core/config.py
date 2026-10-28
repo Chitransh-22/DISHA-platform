@@ -168,6 +168,42 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Ingestion Pipeline Schedule & Feeds (Hours)
+    GNEWS_INTERVAL_HOURS: int = Field(default=6, validation_alias=AliasChoices("GNEWS_INTERVAL_HOURS", "NEWS_INTERVAL_HOURS"))
+    EARTHQUAKE_INTERVAL_HOURS: int = Field(default=1, validation_alias=AliasChoices("EARTHQUAKE_INTERVAL_HOURS", "RISEQ_INTERVAL_HOURS"))
+    SACHET_INTERVAL_HOURS: int = Field(default=1, validation_alias=AliasChoices("SACHET_INTERVAL_HOURS"))
+    OTHER_FEEDS_INTERVAL_HOURS: int = Field(default=1, validation_alias=AliasChoices("OTHER_FEEDS_INTERVAL_HOURS"))
+    CITIZEN_REPORTS_RECONCILE_INTERVAL_HOURS: int = Field(default=1, validation_alias=AliasChoices("CITIZEN_REPORTS_RECONCILE_INTERVAL_HOURS", "RECONCILE_INTERVAL_HOURS"))
+
+    # Ingestion Flags
+    INGESTION_SCHEDULER_ENABLED: bool = Field(default=True, validation_alias=AliasChoices("INGESTION_SCHEDULER_ENABLED", "SCHEDULER_ENABLED"))
+    GNEWS_ENABLED: bool = Field(default=True, validation_alias=AliasChoices("GNEWS_ENABLED", "NEWS_ENABLED"))
+    EARTHQUAKE_ENABLED: bool = Field(default=True, validation_alias=AliasChoices("EARTHQUAKE_ENABLED", "RISEQ_ENABLED"))
+    SACHET_ENABLED: bool = Field(default=True, validation_alias=AliasChoices("SACHET_ENABLED"))
+    OTHER_FEEDS_ENABLED: bool = Field(default=True, validation_alias=AliasChoices("OTHER_FEEDS_ENABLED"))
+
+    # Ingestion Overlap Windows (Hours)
+    OVERLAP_WINDOW_HOURS_GNEWS: int = 24
+    OVERLAP_WINDOW_HOURS_DEFAULT: int = 2
+
+    # Administrative Ingestion Security
+    ADMIN_API_KEY: Optional[str] = Field(default=None, validation_alias=AliasChoices("ADMIN_API_KEY", "INGESTION_ADMIN_KEY", "ADMIN_SECRET"))
+
+    # Gemini AI Quota & Verification Settings
+    GEMINI_API_KEY: Optional[str] = Field(default=None, validation_alias=AliasChoices("GEMINI_API_KEY"))
+    GEMINI_MODEL: str = Field(default="gemini-3.7-flash", validation_alias=AliasChoices("GEMINI_MODEL"))
+    GEMINI_DAILY_REQUEST_BUDGET: int = Field(default=250, validation_alias=AliasChoices("GEMINI_DAILY_REQUEST_BUDGET", "DAILY_REQUEST_LIMIT"))
+    GEMINI_REQUESTS_PER_MINUTE: int = Field(default=10, validation_alias=AliasChoices("GEMINI_REQUESTS_PER_MINUTE", "GEMINI_RPM_LIMIT"))
+    GEMINI_DAILY_TOKEN_BUDGET: int = Field(default=500000, validation_alias=AliasChoices("GEMINI_DAILY_TOKEN_BUDGET"))
+    GEMINI_QUOTA_RESERVE_PERCENT: int = Field(default=20, validation_alias=AliasChoices("GEMINI_QUOTA_RESERVE_PERCENT"))
+    GEMINI_BATCH_SIZE: int = Field(default=10, validation_alias=AliasChoices("GEMINI_BATCH_SIZE"))
+    GEMINI_MAX_CONCURRENCY: int = Field(default=1, validation_alias=AliasChoices("GEMINI_MAX_CONCURRENCY"))
+    GEMINI_AI_ENABLED: bool = Field(default=True, validation_alias=AliasChoices("GEMINI_AI_ENABLED"))
+    GEMINI_MAX_ATTEMPTS_PER_ARTICLE: int = Field(default=3, validation_alias=AliasChoices("GEMINI_MAX_ATTEMPTS_PER_ARTICLE", "MAX_AI_RETRIES"))
+    GEMINI_PROMPT_VERSION: str = "v2.1-202610"
+    GEMINI_CONNECT_TIMEOUT: float = 15.0
+    GEMINI_READ_TIMEOUT: float = 60.0
+
     # Rate Limiting Settings (Requests per minute)
     RATE_LIMIT_REGISTER: int = 10
     RATE_LIMIT_LOGIN: int = 10

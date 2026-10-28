@@ -35,6 +35,10 @@ from app.routes.earthquakes import router as earthquakes_router
 from app.routes.sachet import router as sachet_router
 from app.routes.analysis import router as analysis_router
 from app.routes.incidents import router as incidents_router, reports_alias_router
+from app.routes.admin_ingestion import router as admin_ingestion_router
+from app.services.distributed_lock import init_lock_indexes
+from app.services.checkpoint_service import init_checkpoint_indexes
+from app.services.ingestion_scheduler import scheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,13 +61,25 @@ async def lifespan(app: FastAPI):
         # Initialize sync collections indexes for legacy pipelines
         sync_db = sync_mongodb.db
         init_db_indexes(sync_db)
+        init_lock_indexes()
+        init_checkpoint_indexes()
         logger.info("[Database] All MongoDB indexes verified successfully.")
     except Exception as e:
         logger.warning(f"[Database] Notice during database initialization: {e}")
 
+    # Start automated background ingestion scheduler
+    try:
+        scheduler.start()
+    except Exception as e:
+        logger.warning(f"[Scheduler] Notice starting ingestion scheduler: {e}")
+
     yield
 
     logger.info("Shutting down DISHA Backend API...")
+    try:
+        scheduler.stop()
+    except Exception:
+        pass
     await close_db_connections()
 
 
@@ -107,6 +123,7 @@ app.include_router(news_router)
 app.include_router(earthquakes_router)
 app.include_router(sachet_router)
 app.include_router(analysis_router)
+app.include_router(admin_ingestion_router)
 
 
 @app.get("/", tags=["General"], summary="Root Health & API Overview")
