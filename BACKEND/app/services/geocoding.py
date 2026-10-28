@@ -373,6 +373,6 @@ def geocode_location(
 
     # 4. Country centroid default for India
     if country and country.strip().lower() == "india":
-        return 20.5937, 78.9629, "country"
+        return None, None, "country_unresolved"
 
     return None, None, "unknown"

@@ -117,7 +117,7 @@ function extractSachetCoordinates(sa) {
     }
   }
 
-  return { lat: 20.5937, lon: 78.9629 };
+  return { lat: null, lon: null };
 }
 
 /**
@@ -147,6 +147,12 @@ export const fetchEvents = async (params = {}) => {
   }
   if (params.state) {
     query.append('state', params.state);
+  }
+  if (params.start_date || params.startDate) {
+    query.append('start_date', params.start_date || params.startDate);
+  }
+  if (params.end_date || params.endDate) {
+    query.append('end_date', params.end_date || params.endDate);
   }
   if (params.limit) {
     query.append('limit', params.limit);

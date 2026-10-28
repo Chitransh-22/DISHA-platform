@@ -151,40 +151,30 @@ async function fetchEndpointWithFallback(endpoint) {
 /**
  * Fetch 100% real live records directly from DB backend
  */
-export async function fetchRawAnalysisData() {
+export async function fetchRawAnalysisData(timeRange = 'all', customRange = null) {
+  let rangeParam = `time_range=${encodeURIComponent(timeRange)}`;
+  if (customRange?.startDate) {
+    rangeParam += `&start_date=${encodeURIComponent(customRange.startDate)}`;
+  }
+  if (customRange?.endDate) {
+    rangeParam += `&end_date=${encodeURIComponent(customRange.endDate)}`;
+  }
+
   const [
-    analysisDataRes,
+    eventsRes,
     analysisOverviewRes,
-    unifiedEventsRes,
-    eqRes,
-    sachetRes,
-    newsRes,
     rejectedRes,
-    eqStats,
-    sachetStats,
     newsStats,
   ] = await Promise.all([
-    fetchEndpointWithFallback('/api/analysis/data?limit=1000&time_window=all'),
-    fetchEndpointWithFallback('/api/analysis/overview'),
-    fetchEndpointWithFallback('/api/events?range=all'),
-    fetchEndpointWithFallback('/api/earthquakes?limit=500&last_30_days_only=false'),
-    fetchEndpointWithFallback('/api/sachet?limit=500&last_30_days_only=false'),
-    fetchEndpointWithFallback('/api/news/disasters?limit=500'),
+    fetchEndpointWithFallback(`/api/events?${rangeParam}&limit=5000`),
+    fetchEndpointWithFallback(`/api/analysis/overview?${rangeParam}`),
     fetchEndpointWithFallback('/api/news/rejected?limit=500'),
-    fetchEndpointWithFallback('/api/earthquakes/stats'),
-    fetchEndpointWithFallback('/api/sachet/stats'),
     fetchEndpointWithFallback('/api/news/stats'),
   ]);
-
-  const earthquakes = (analysisDataRes && analysisDataRes.earthquakes) || (eqRes && eqRes.earthquakes) || [];
-  const sachetAlerts = (analysisDataRes && analysisDataRes.sachet_alerts) || (sachetRes && sachetRes.alerts) || [];
-  const newsDisasters = (analysisDataRes && analysisDataRes.disasters) || (newsRes && newsRes.disasters) || [];
-  const rejectedItems = (rejectedRes && rejectedRes.rejected) || [];
 
   const unifiedEvents = [];
   const seenIds = new Set();
 
-  // Helper to add unique events
   const addEvent = (ev) => {
     if (!ev || !ev.id) return;
     if (!seenIds.has(ev.id)) {
@@ -193,176 +183,61 @@ export async function fetchRawAnalysisData() {
     }
   };
 
-  // 1. Normalize real Earthquakes from NCS RISEQ (earthquakes collection)
-  if (Array.isArray(earthquakes)) {
-    earthquakes.forEach((eq) => {
-      const mag = eq.magnitude || 4.0;
-      const detectedState = (eq.relevance_details?.detected_states && eq.relevance_details.detected_states[0]) || eq.state || eq.region || 'Regional';
-      
-      let sev = 'Moderate';
-      if (mag >= 6.0) sev = 'Critical';
-      else if (mag >= 4.5) sev = 'Severe';
-      else if (mag < 3.5) sev = 'Low';
-
-      const eventId = eq.event_id || (eq._id ? String(eq._id) : `ncs-${Math.random()}`);
-
+  if (eventsRes && Array.isArray(eventsRes.events)) {
+    eventsRes.events.forEach((ev) => {
+      const hasCoords = ev.has_coordinates !== false && ev.latitude != null && ev.longitude != null;
       addEvent({
-        id: eventId,
-        title: `M${mag} Earthquake — ${eq.region || eq.location || 'Seismic Faultline'}`,
-        type: 'Earthquake',
-        severity: sev,
-        rawSeverity: sev,
-        magnitude: mag,
-        depth_km: eq.depth_km || 10,
-        state: detectedState,
-        location: eq.location || eq.region || 'Seismic Epicenter',
-        lat: typeof eq.latitude === 'number' ? eq.latitude : 28.0,
-        lng: typeof eq.longitude === 'number' ? eq.longitude : 77.0,
-        reportedAt: eq.origin_time || eq.created_at || new Date().toISOString(),
-        status: eq.status === 'Reviewed' ? 'Monitoring' : 'Active',
-        source: 'National Center for Seismology (NCS RISEQ)',
-        sourceType: 'NCS_RISEQ',
-        relevance: eq.relevance || 'INDIA',
-        rawDoc: eq,
+        id: ev.id,
+        db_id: ev.db_id,
+        title: ev.title || `${ev.category || 'Disaster'} in ${ev.state || ev.location || 'India'}`,
+        type: ev.category || 'Other',
+        severity: ev.severity || 'Moderate',
+        rawSeverity: ev.severity || 'Moderate',
+        magnitude: ev.metadata?.magnitude || null,
+        depth_km: ev.metadata?.depth_km || null,
+        state: ev.state || (hasCoords ? 'Regional' : 'Unknown / Unresolved'),
+        location: ev.location || ev.state || 'India',
+        lat: hasCoords ? ev.latitude : null,
+        lng: hasCoords ? ev.longitude : null,
+        hasCoordinates: hasCoords,
+        locationStatus: ev.location_status || (hasCoords ? 'exact' : 'unresolved'),
+        reportedAt: ev.datetime || ev.date || new Date().toISOString(),
+        timestamp: ev.timestamp || null,
+        status: ev.status || 'Active',
+        source: ev.source_label || ev.source || 'DISHA Ingestion Feed',
+        sourceType: ev.source || (ev.source_group === 'ncs' ? 'NCS_RISEQ' : ev.source_group === 'sachet' ? 'NDMA_SACHET' : ev.source_group === 'citizen' ? 'CITIZEN_REPORT' : 'GNEWS'),
+        rawDoc: ev,
       });
     });
   }
 
-  // 2. Normalize real Alerts from NDMA SACHET CAP (sachet_alerts collection)
-  if (Array.isArray(sachetAlerts)) {
-    sachetAlerts.forEach((alert) => {
-      const rawType = (alert.disaster_type || alert.event || 'alert').toLowerCase();
-      let normType = 'Other';
-      if (rawType.includes('flood')) normType = 'Flood';
-      else if (rawType.includes('rain')) normType = 'Heavy Rain / Flood';
-      else if (rawType.includes('cyclone') || rawType.includes('wind')) normType = 'Cyclone';
-      else if (rawType.includes('landslide')) normType = 'Landslide';
-      else if (rawType.includes('fire')) normType = 'Fire';
-      else if (rawType.includes('lightning')) normType = 'Lightning';
-      else if (rawType.includes('heat') || rawType.includes('temp')) normType = 'Heatwave';
-
-      const rawSev = (alert.severity || 'Moderate').toLowerCase();
-      let normSev = 'Moderate';
-      if (rawSev.includes('extreme') || rawSev.includes('critical')) normSev = 'Critical';
-      else if (rawSev.includes('severe') || rawSev.includes('high')) normSev = 'Severe';
-      else if (rawSev.includes('minor') || rawSev.includes('low')) normSev = 'Low';
-
-      const stateName = alert.location?.state || alert.state || 'Assam';
-      const eventId = alert.event_id || alert.alert_id || (alert._id ? String(alert._id) : `sachet-${Math.random()}`);
-
-      addEvent({
-        id: eventId,
-        title: alert.headline || alert.title || `${normType} Alert in ${alert.location?.district || stateName}`,
-        type: normType,
-        severity: normSev,
-        rawSeverity: alert.severity || 'Moderate',
-        state: stateName,
-        location: alert.location?.district || alert.area_description || stateName,
-        lat: typeof alert.latitude === 'number' ? alert.latitude : 26.0,
-        lng: typeof alert.longitude === 'number' ? alert.longitude : 90.0,
-        reportedAt: alert.event_time || alert.sent_at || alert.published_at || new Date().toISOString(),
-        status: alert.is_active ? 'Active' : 'Contained',
-        source: 'NDMA SACHET CAP',
-        sourceType: 'NDMA_SACHET',
-        urgency: alert.urgency || 'Expected',
-        certainty: alert.certainty || 'Observed',
-        rawDoc: alert,
-      });
-    });
-  }
-
-  // 3. Normalize real Disasters from Google News Gemini AI Classifier (disaster_events collection)
-  if (Array.isArray(newsDisasters)) {
-    newsDisasters.forEach((news) => {
-      const rawType = (news.disaster_type || news.category || 'other').toLowerCase();
-      let normType = 'Other';
-      if (rawType.includes('flood')) normType = 'Flood';
-      else if (rawType.includes('rain')) normType = 'Heavy Rain / Flood';
-      else if (rawType.includes('landslide')) normType = 'Landslide';
-      else if (rawType.includes('cyclone')) normType = 'Cyclone';
-      else if (rawType.includes('fire')) normType = 'Fire';
-      else if (rawType.includes('earthquake')) normType = 'Earthquake';
-      else if (rawType.includes('cloudburst')) normType = 'Cloudburst';
-
-      const rawSev = (news.severity || 'medium').toLowerCase();
-      let normSev = 'Moderate';
-      if (rawSev === 'critical') normSev = 'Critical';
-      else if (rawSev === 'high' || rawSev === 'severe') normSev = 'Severe';
-      else if (rawSev === 'low') normSev = 'Low';
-
-      const stateName = news.location?.state || 'National';
-      const eventId = news.event_id || news.article_id || (news._id ? String(news._id) : `news-${Math.random()}`);
-
-      addEvent({
-        id: eventId,
-        title: news.title || `${normType} Emergency in ${news.location?.district || stateName}`,
-        type: normType,
-        severity: normSev,
-        rawSeverity: news.severity || 'medium',
-        state: stateName,
-        location: news.location?.district || news.location?.city || stateName,
-        lat: news.location?.latitude || news.location?.lat || 28.5,
-        lng: news.location?.longitude || news.location?.lon || 77.2,
-        reportedAt: news.processed_at || news.published_at || new Date().toISOString(),
-        status: news.status === 'active' ? 'Active' : 'Monitoring',
-        source: news.source ? `Verified News (${news.source})` : 'Verified News Intelligence',
-        sourceType: 'VERIFIED_NEWS',
-        confidence: news.confidence || 0.9,
-        evidence: news.evidence || [],
-        rawDoc: news,
-      });
-    });
-  }
-
-  // 4. Merge any additional events from unified events service
-  if (unifiedEventsRes && Array.isArray(unifiedEventsRes.events)) {
-    unifiedEventsRes.events.forEach((ev) => {
-      if (ev && ev.id && !seenIds.has(ev.id)) {
-        addEvent({
-          id: ev.id,
-          title: ev.title || `${ev.category || 'Disaster'} in ${ev.state || 'India'}`,
-          type: ev.category || 'Other',
-          severity: ev.severity || 'Moderate',
-          rawSeverity: ev.severity || 'Moderate',
-          state: ev.state || 'India',
-          location: ev.location || ev.state || 'India',
-          lat: typeof ev.latitude === 'number' ? ev.latitude : 28.0,
-          lng: typeof ev.longitude === 'number' ? ev.longitude : 77.0,
-          reportedAt: ev.datetime || ev.date || new Date().toISOString(),
-          status: ev.status || 'Active',
-          source: ev.source_label || ev.source || 'DISHA Ingestion Feed',
-          sourceType: (ev.source_type || ev.source || '').includes('NCS') ? 'NCS_RISEQ' : (ev.source_type || ev.source || '').includes('SACHET') ? 'NDMA_SACHET' : 'VERIFIED_NEWS',
-          rawDoc: ev,
-        });
-      }
-    });
-  }
+  const rejectedItems = (rejectedRes && rejectedRes.rejected) || [];
+  const srcCounts = eventsRes?.source_counts || {
+    earthquakes: unifiedEvents.filter(e => e.sourceType === 'NCS_RISEQ' || e.sourceType === 'ncs').length,
+    sachet: unifiedEvents.filter(e => e.sourceType === 'NDMA_SACHET' || e.sourceType === 'sachet').length,
+    news: unifiedEvents.filter(e => e.sourceType === 'GNEWS' || e.sourceType === 'news').length,
+    citizen_reports: unifiedEvents.filter(e => e.sourceType === 'CITIZEN_REPORT' || e.sourceType === 'citizen').length,
+    total: unifiedEvents.length,
+  };
 
   return {
     rawIncidents: unifiedEvents,
+    timeRange: timeRange,
+    total: eventsRes?.total ?? unifiedEvents.length,
+    mappedCount: eventsRes?.mapped_count ?? unifiedEvents.filter(e => e.hasCoordinates).length,
+    unmappedCount: eventsRes?.unmapped_count ?? unifiedEvents.filter(e => !e.hasCoordinates).length,
     dbStats: {
-      overview: analysisOverviewRes,
-      earthquakeStats: eqStats,
-      sachetStats: sachetStats,
+      overview: analysisOverviewRes || eventsRes,
       newsStats: newsStats,
       rejectedCount: rejectedItems.length,
       rejectedSamples: rejectedItems,
     },
-    counts: {
-      earthquakes: earthquakes.length,
-      sachet: sachetAlerts.length,
-      news: newsDisasters.length,
-      rejected: rejectedItems.length,
-      total: unifiedEvents.length,
-    },
-    isLiveBackend: earthquakes.length > 0 || sachetAlerts.length > 0 || newsDisasters.length > 0,
+    counts: srcCounts,
+    isLiveBackend: unifiedEvents.length > 0 || (eventsRes && eventsRes.status === 'success'),
     lastSyncTime: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
   };
 }
 
-/**
- * Filter real events by multi-criteria global filters
- */
 export function filterIncidents(incidents, filters) {
   if (!Array.isArray(incidents)) return [];
 
@@ -380,12 +255,13 @@ export function filterIncidents(incidents, filters) {
     if (!item) return false;
 
     // 1. Time Window Filter
-    if (timeWindow !== 'all' && item.reportedAt) {
-      const itemTime = new Date(item.reportedAt).getTime();
+    if (timeWindow && timeWindow !== 'all') {
+      const itemTime = item.timestamp ? (item.timestamp * 1000) : (item.reportedAt ? new Date(item.reportedAt).getTime() : NaN);
       if (!isNaN(itemTime)) {
         const diffHours = (now - itemTime) / (1000 * 60 * 60);
         if (timeWindow === '24h' && diffHours > 24) return false;
         if (timeWindow === '7d' && diffHours > 24 * 7) return false;
+        if (timeWindow === '15d' && diffHours > 24 * 15) return false;
         if (timeWindow === '30d' && diffHours > 24 * 30) return false;
       }
     }
@@ -420,16 +296,14 @@ export function filterIncidents(incidents, filters) {
       const targetSrc = dataSource.toLowerCase();
       if (targetSrc.includes('sachet') && !itSrc.includes('sachet')) return false;
       if (targetSrc.includes('ncs') && !itSrc.includes('ncs') && !itSrc.includes('riseq')) return false;
-      if (targetSrc.includes('news') && !itSrc.includes('news')) return false;
+      if (targetSrc.includes('news') && !itSrc.includes('news') && !itSrc.includes('gnews')) return false;
+      if (targetSrc.includes('citizen') && !itSrc.includes('citizen') && !itSrc.includes('report')) return false;
     }
 
     return true;
   });
 }
 
-/**
- * Compute Executive KPIs and 40 Graph Datasets strictly from real DB records
- */
 export function computeAnalysisAnalytics(filteredIncidents, allIncidents, dbStats = {}) {
   const stats = dbStats || {};
   const dataset = Array.isArray(filteredIncidents) ? filteredIncidents : allIncidents || [];
@@ -453,6 +327,7 @@ export function computeAnalysisAnalytics(filteredIncidents, allIncidents, dbStat
     'NDMA SACHET CAP': 0,
     'NCS RISEQ Seismology': 0,
     'Google News Verified Disasters': 0,
+    'Citizen Incident Reports': 0,
   };
   const statusCounter = {};
   const hourCounter = {
@@ -504,8 +379,9 @@ export function computeAnalysisAnalytics(filteredIncidents, allIncidents, dbStat
     typeCounter[type] = (typeCounter[type] || 0) + 1;
     stateCounter[st] = (stateCounter[st] || 0) + 1;
 
-    if (srcType === 'NDMA_SACHET') sourceCounter['NDMA SACHET CAP'] += 1;
-    else if (srcType === 'NCS_RISEQ') sourceCounter['NCS RISEQ Seismology'] += 1;
+    if (srcType === 'NDMA_SACHET' || srcType === 'sachet') sourceCounter['NDMA SACHET CAP'] += 1;
+    else if (srcType === 'NCS_RISEQ' || srcType === 'ncs') sourceCounter['NCS RISEQ Seismology'] += 1;
+    else if (srcType === 'CITIZEN_REPORT' || srcType === 'citizen') sourceCounter['Citizen Incident Reports'] += 1;
     else sourceCounter['Google News Verified Disasters'] += 1;
 
     statusCounter[stat] = (statusCounter[stat] || 0) + 1;

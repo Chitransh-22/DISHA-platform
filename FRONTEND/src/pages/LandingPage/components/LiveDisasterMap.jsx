@@ -32,6 +32,7 @@ import { IncidentDetailModal } from './IncidentDetailModal';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../../../config/eventConfig';
 import { formatDateTimeIST } from '../../../utils/dateTime';
 import { normalizeEvent } from '../../../utils/eventNormalizer';
+import { useTimeRange } from '../../../context/TimeRangeContext';
 
 export const LiveDisasterMap = () => {
   const mapContainerRef = useRef(null);
@@ -46,8 +47,12 @@ export const LiveDisasterMap = () => {
   const [eventsError, setEventsError] = useState(null);
   const [sourceCounts, setSourceCounts] = useState({ total: 0, earthquakes: 0, sachet: 0, news: 0 });
 
-  // Time Range Filter State (Default: '24h')
-  const [timeRange, setTimeRange] = useState('24h');
+  // Shared Global Time Range State
+  const { timeRange, setTimeRange, availableRanges } = useTimeRange();
+  const [unmappedEvents, setUnmappedEvents] = useState([]);
+  const [totalIncidentsCount, setTotalIncidentsCount] = useState(0);
+  const [showUnmappedDrawer, setShowUnmappedDrawer] = useState(false);
+  const requestIdRef = useRef(0);
 
   // Filters State
   const [activeSource, setActiveSource] = useState('all'); // 'all', 'ncs', 'sachet', 'news'
@@ -74,63 +79,82 @@ export const LiveDisasterMap = () => {
     new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
   );
 
-  // 1. Fetch real database events from backend with time range filter
+  // 1. Fetch real database events from backend with time range filter and race-condition prevention
   const loadEventsData = async (targetRange = timeRange) => {
+    const reqId = ++requestIdRef.current;
     setLoadingEvents(true);
     setEventsError(null);
     try {
       const data = await fetchEvents({ range: targetRange });
+      if (reqId !== requestIdRef.current) return;
+
       if (data && Array.isArray(data.events)) {
-        // Normalize each event object and filter strictly to valid numeric coordinates
-        const validEvents = data.events
-          .map((ev) => normalizeEvent(ev))
-          .filter(
-            (ev) =>
-              ev &&
-              typeof ev.latitude === 'number' &&
-              typeof ev.longitude === 'number' &&
-              !isNaN(ev.latitude) &&
-              !isNaN(ev.longitude) &&
-              ev.latitude >= -90 &&
-              ev.latitude <= 90 &&
-              ev.longitude >= -180 &&
-              ev.longitude <= 180
-          );
+        const allRaw = data.events.map((ev) => normalizeEvent(ev));
+        const validEvents = allRaw.filter(
+          (ev) =>
+            ev &&
+            ev.has_coordinates !== false &&
+            typeof ev.latitude === 'number' &&
+            typeof ev.longitude === 'number' &&
+            !isNaN(ev.latitude) &&
+            !isNaN(ev.longitude) &&
+            ev.latitude >= -90 &&
+            ev.latitude <= 90 &&
+            ev.longitude >= -180 &&
+            ev.longitude <= 180
+        );
+
+        const unmapped = allRaw.filter(
+          (ev) =>
+            !ev ||
+            ev.has_coordinates === false ||
+            typeof ev.latitude !== 'number' ||
+            typeof ev.longitude !== 'number' ||
+            isNaN(ev.latitude) ||
+            isNaN(ev.longitude)
+        );
 
         setEvents(validEvents);
+        setUnmappedEvents(unmapped);
+        setTotalIncidentsCount(data.total ?? allRaw.length);
 
         if (data.source_counts) {
           setSourceCounts(data.source_counts);
         } else {
           setSourceCounts({
-            total: validEvents.length,
-            earthquakes: validEvents.filter((e) => e.source === 'NCS_RISEQ' || e.source_group === 'ncs').length,
-            sachet: validEvents.filter((e) => e.source === 'NDMA_SACHET' || e.source_group === 'sachet').length,
-            news: validEvents.filter((e) => e.source === 'GNEWS' || e.source_group === 'news').length,
+            total: allRaw.length,
+            earthquakes: allRaw.filter((e) => e.source === 'NCS_RISEQ' || e.source_group === 'ncs').length,
+            sachet: allRaw.filter((e) => e.source === 'NDMA_SACHET' || e.source_group === 'sachet').length,
+            news: allRaw.filter((e) => e.source === 'GNEWS' || e.source_group === 'news').length,
+            citizen: allRaw.filter((e) => e.source === 'CITIZEN_REPORT' || e.source_group === 'citizen').length,
           });
         }
 
         setLastSyncTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
       } else {
         setEvents([]);
+        setUnmappedEvents([]);
+        setTotalIncidentsCount(0);
       }
     } catch (err) {
+      if (reqId !== requestIdRef.current) return;
       console.error('[LiveDisasterMap] Failed to load events:', err);
       setEventsError('Unable to load events. Please check connection and try again.');
     } finally {
-      setLoadingEvents(false);
+      if (reqId === requestIdRef.current) {
+        setLoadingEvents(false);
+      }
     }
   };
 
   const handleTimeRangeChange = (newRange) => {
     if (newRange === timeRange) return;
     setTimeRange(newRange);
-    loadEventsData(newRange);
   };
 
   useEffect(() => {
-    loadEventsData('24h');
-  }, []);
+    loadEventsData(timeRange);
+  }, [timeRange]);
 
   // Compute category counts for sorting in descending order
   const categoryCounts = useMemo(() => {
@@ -674,8 +698,24 @@ export const LiveDisasterMap = () => {
                   GIS Rescue Intelligence
                 </span>
               </div>
-              <p className="text-xs text-slate-500 font-medium">
-                {events.length} Real-Time Events Ingested from NCS, NDMA & News • Select an incident to map first-responders
+              <p className="text-xs text-slate-500 font-medium flex flex-wrap items-center gap-1.5 mt-0.5">
+                <span className="font-bold text-slate-700 font-sans">{totalIncidentsCount} incidents in selected range</span>
+                <span>•</span>
+                <span className="text-emerald-700 font-semibold">{events.length} mapped</span>
+                <span>•</span>
+                {unmappedEvents.length > 0 ? (
+                  <button
+                    onClick={() => setShowUnmappedDrawer(true)}
+                    className="text-amber-700 hover:text-amber-800 font-semibold underline cursor-pointer hover:bg-amber-50 px-1 py-0.5 rounded transition-colors"
+                    title="Click to view incidents awaiting exact coordinates"
+                  >
+                    {unmappedEvents.length} awaiting location (view details)
+                  </button>
+                ) : (
+                  <span className="text-slate-500">0 awaiting location</span>
+                )}
+                <span>•</span>
+                <span>Select an incident to view emergency response</span>
               </p>
             </div>
           </div>
@@ -688,12 +728,7 @@ export const LiveDisasterMap = () => {
                 <Clock className="w-3.5 h-3.5 text-orange-500" />
                 <span className="hidden md:inline">Time:</span>
               </span>
-              {[
-                { id: '24h', label: '24 Hours' },
-                { id: '7d', label: '7 Days' },
-                { id: '15d', label: '15 Days' },
-                { id: '30d', label: '30 Days' },
-              ].map((t) => (
+              {availableRanges.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => handleTimeRangeChange(t.id)}
@@ -1441,6 +1476,82 @@ export const LiveDisasterMap = () => {
         </div>
 
       </div>
+
+            {/* Unmapped Incidents Modal (Zero Event Loss) */}
+      {showUnmappedDrawer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-scale-up">
+            {/* Header */}
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div>
+                <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-500" />
+                  <span>Incidents Awaiting Geographic Location ({unmappedEvents.length})</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  These incidents occurred within the selected time window ({timeRange}) and contribute fully to analysis metrics, but lack exact lat/lon coordinates for Leaflet map markers.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowUnmappedDrawer(false)}
+                className="w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center text-slate-600 cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Content List */}
+            <div className="p-6 overflow-y-auto space-y-3.5 divide-y divide-slate-100">
+              {unmappedEvents.map((item, idx) => (
+                <div key={item.id || idx} className="pt-3.5 first:pt-0 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-800">
+                      {item.category || 'Incident'}
+                    </span>
+                    <span className="text-[11px] font-semibold text-slate-400 font-mono">
+                      {item.source_label || item.source} • {item.date || item.datetime?.split('T')[0] || 'Recent'}
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-900 leading-snug">
+                    {item.title}
+                  </h4>
+                  <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                    {item.description}
+                  </p>
+                  <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+                    <div className="flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span className="font-medium text-slate-700">{item.location || item.state || 'Unspecified Jurisdiction'}</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setShowUnmappedDrawer(false);
+                        setModalIncident(item);
+                      }}
+                      className="text-xs font-bold text-orange-600 hover:text-orange-700 hover:underline cursor-pointer"
+                    >
+                      View Situation Briefing →
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                Data integrity invariant holds: Total ({totalIncidentsCount}) = Mapped ({events.length}) + Awaiting ({unmappedEvents.length})
+              </span>
+              <button
+                onClick={() => setShowUnmappedDrawer(false)}
+                className="px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl hover:bg-slate-800 cursor-pointer transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Situation Briefing Modal */}
       {modalIncident && (

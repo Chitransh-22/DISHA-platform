@@ -3,7 +3,8 @@ DISHA Platform - Unified Disaster Events API Routes
 Disaster Intelligence and Situational Hazard Awareness Platform
 
 Exposes clean endpoints for map visualization, geospatial filtering,
-and unified hazard feeds from NCS RISEQ, NDMA SACHET, and verified news intelligence.
+and unified hazard feeds from NCS RISEQ, NDMA SACHET, verified news intelligence,
+and citizen incident reports.
 """
 
 import sys
@@ -26,17 +27,32 @@ router = APIRouter(
 
 @router.get(
     "",
-    summary="Retrieve unified disaster and hazard events for map visualization",
+    summary="Retrieve unified disaster and hazard events for map visualization and analysis",
 )
 async def list_unified_events(
     time_range: Optional[str] = Query(
-        "24h",
-        alias="range",
-        description="Time filter ('24h', '7d', '15d', '30d', 'all'). Default: '24h'",
+        None,
+        description="Time filter ('24h', '7d', '15d', '30d', 'all', 'custom'). Default: '24h'",
+    ),
+    range: Optional[str] = Query(
+        None,
+        description="Alternative query alias for time range",
+    ),
+    time_window: Optional[str] = Query(
+        None,
+        description="Alias for time range ('24h', '7d', '15d', '30d', 'all')",
     ),
     days: Optional[int] = Query(
         None,
         description="Alternative days integer filter (1, 7, 15, 30)",
+    ),
+    start_date: Optional[str] = Query(
+        None,
+        description="Custom range start date/timestamp (ISO 8601 or YYYY-MM-DD)",
+    ),
+    end_date: Optional[str] = Query(
+        None,
+        description="Custom range end date/timestamp (ISO 8601 or YYYY-MM-DD)",
     ),
     category: Optional[str] = Query(
         None,
@@ -53,7 +69,7 @@ async def list_unified_events(
     ),
     source: Optional[str] = Query(
         None,
-        description="Filter by source ('all', 'earthquakes', 'sachet', 'news')",
+        description="Filter by source ('all', 'earthquakes', 'sachet', 'news', 'citizen')",
     ),
     state: Optional[str] = Query(
         None,
@@ -62,7 +78,7 @@ async def list_unified_events(
     limit: Optional[int] = Query(
         None,
         ge=1,
-        le=2000,
+        le=5000,
         description="Maximum events to return",
     ),
     skip: int = Query(
@@ -73,12 +89,17 @@ async def list_unified_events(
 ):
     """
     Returns 100% real verified disaster events directly from MongoDB
-    (NCS RISEQ Earthquakes, NDMA SACHET Alerts, and Verified Disaster News)
-    with exact coordinates for Leaflet/GIS map plotting.
-    Time filtered at database query level (default: last 24 hours).
+    (NCS RISEQ Earthquakes, NDMA SACHET Alerts, Verified Disaster News, Citizen Incident Reports).
+    Preserves zero-event-loss invariant: Total (T) = Mapped (M) + Unmapped (U).
     """
     try:
-        effective_range = f"{days}d" if days is not None else (time_range or "24h")
+        if days is not None:
+            effective_range = f"{days}d"
+        elif time_window is not None:
+            effective_range = time_window
+        else:
+            effective_range = time_range or range or "24h"
+
         data = get_unified_events(
             category=category,
             severity=severity,
@@ -88,6 +109,8 @@ async def list_unified_events(
             limit=limit,
             skip=skip,
             time_range=effective_range,
+            start_date=start_date,
+            end_date=end_date,
         )
         return data
     except Exception as e:
