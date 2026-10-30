@@ -25,6 +25,12 @@ from typing import Dict, List, Any, Optional, Tuple
 
 from app.database.mongodb import db
 from app.services.geocoding import detect_locations, geocode_location
+from app.services.geo_filter_service import (
+    is_valid_coordinate,
+    normalize_geographic_query,
+    evaluate_event_geographic_match,
+    geocode_with_cache,
+)
 
 logger = logging.getLogger("disha.events_service")
 logger.setLevel(logging.INFO)
@@ -278,7 +284,7 @@ def extract_news_coordinates(ev: dict) -> Tuple[Optional[float], Optional[float]
     """
     Robust coordinate extractor for GNews Disasters.
     Returns: (lat, lon, precision) where lat/lon may be None if unresolvable.
-    NEVER substitutes fake India default centroid.
+    NEVER substitutes fake India default centroid or infers precise coordinates from ambiguous text.
     """
     loc = ev.get("location") or {}
     lat = loc.get("latitude") if isinstance(loc, dict) else ev.get("latitude")
@@ -291,11 +297,9 @@ def extract_news_coordinates(ev: dict) -> Tuple[Optional[float], Optional[float]
     if lat is not None and lon is not None:
         try:
             flat, flon = float(lat), float(lon)
-            if -90 <= flat <= 90 and -180 <= flon <= 180:
-                if abs(flat - 20.5937) < 0.001 and abs(flon - 78.9629) < 0.001:
-                    pass  # Reject legacy fake India default centroid
-                else:
-                    return flat, flon, "exact"
+            if is_valid_coordinate(flat, flon):
+                precision = loc.get("precision") if isinstance(loc, dict) and loc.get("precision") else "exact"
+                return flat, flon, precision
         except (ValueError, TypeError):
             pass
 
@@ -303,18 +307,8 @@ def extract_news_coordinates(ev: dict) -> Tuple[Optional[float], Optional[float]
     dt = loc.get("district") if isinstance(loc, dict) else None
     ct = loc.get("city") if isinstance(loc, dict) else None
     if st or dt or ct:
-        glat, glon, prec = geocode_location(country="India", state=st, district=dt, city=ct)
-        if glat is not None and glon is not None:
-            return glat, glon, f"text_{prec}"
-
-    # Extract from title/description
-    raw_text = f"{ev.get('title', '')} {ev.get('description', '')}"
-    detected = detect_locations(raw_text)
-    st = detected["states"][0] if detected["states"] else None
-    dt = detected["cities"][0] if detected["cities"] else None
-    if st or dt:
-        glat, glon, prec = geocode_location(country="India", state=st, district=dt)
-        if glat is not None and glon is not None:
+        glat, glon, prec = geocode_with_cache(country="India", state=st, district=dt, city=ct)
+        if is_valid_coordinate(glat, glon):
             return glat, glon, f"text_{prec}"
 
     return None, None, "unresolved"
@@ -465,6 +459,8 @@ def get_unified_events(
     status: Optional[str] = None,
     source: Optional[str] = None,
     state: Optional[str] = None,
+    district: Optional[str] = None,
+    city: Optional[str] = None,
     limit: Optional[int] = None,
     skip: int = 0,
     time_range: str = "24h",
@@ -489,6 +485,19 @@ def get_unified_events(
         start_date=start_date,
         end_date=end_date,
     )
+
+    category = category if isinstance(category, str) else None
+    severity = severity if isinstance(severity, str) else None
+    status = status if isinstance(status, str) else None
+    source = source if isinstance(source, str) else None
+    state = state if isinstance(state, str) else None
+    district = district if isinstance(district, str) else None
+    city = city if isinstance(city, str) else None
+    limit = limit if isinstance(limit, int) else None
+    skip = skip if isinstance(skip, int) else 0
+    time_range = time_range if isinstance(time_range, str) else "24h"
+    start_date = start_date if isinstance(start_date, str) else None
+    end_date = end_date if isinstance(end_date, str) else None
 
     all_events: List[Dict[str, Any]] = []
     eq_count = 0
@@ -997,13 +1006,15 @@ def get_unified_events(
             if e["status"].lower() == st_req
         ]
 
-    # Filter by state if requested
-    if state and state.strip():
-        st_query = state.strip().lower()
-        filtered_events = [
-            e for e in filtered_events
-            if st_query in e.get("state", "").lower() or st_query in e.get("location", "").lower()
-        ]
+    # Filter by geographic area if requested (state, district, city)
+    geo_area = normalize_geographic_query(country="India", state=state, district=district, city=city)
+    if geo_area["level"] != "country":
+        matching = []
+        for e in filtered_events:
+            res = evaluate_event_geographic_match(e, geo_area)
+            if res["is_match"]:
+                matching.append(e)
+        filtered_events = matching
 
     # Compute available categories sorted descending by event count
     cat_counts: Dict[str, int] = {}

@@ -85,7 +85,7 @@ STATE_ALIASES = {
     "Ladakh": ["ladakh", "leh", "kargil", "nubra", "drass", "zanskar"],
     "Puducherry": ["puducherry", "pondicherry", "karaikal", "mahe", "yanam"],
     "Chandigarh": ["chandigarh"],
-    "Andaman and Nicobar": ["andaman and nicobar", "andaman & nicobar", "port blair", "andaman", "nicobar", "havelock"],
+    "Andaman and Nicobar": ["andaman and nicobar islands", "andaman and nicobar", "andaman & nicobar", "andaman & nicobar islands", "port blair", "andaman", "nicobar", "havelock"],
     "Dadra and Nagar Haveli and Daman and Diu": ["daman", "diu", "silvassa", "dadra and nagar haveli"],
     "Lakshadweep": ["lakshadweep", "kavaratti", "agatti", "minicoy"],
 }

@@ -36,6 +36,7 @@ def get_async_client() -> AsyncIOMotorClient:
         _async_client = AsyncIOMotorClient(
             settings.MONGO_URI,
             serverSelectionTimeoutMS=5000,
+            readPreference="secondaryPreferred",
         )
         _async_client_loop = current_loop
     return _async_client
@@ -53,6 +54,7 @@ def get_sync_client() -> MongoClient:
         _sync_client = MongoClient(
             settings.MONGO_URI,
             serverSelectionTimeoutMS=5000,
+            readPreference="secondaryPreferred",
         )
     return _sync_client
 

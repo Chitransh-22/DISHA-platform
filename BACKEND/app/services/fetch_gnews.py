@@ -27,6 +27,7 @@ load_dotenv()
 
 from app.database.mongodb import db
 from app.services.geocoding import geocode_location, detect_locations
+from app.services.geo_filter_service import is_valid_coordinate, geocode_with_cache
 from app.services.source_scorer import score_source
 from app.services.temporal_extractor import (
     parse_published_date,
@@ -906,19 +907,26 @@ def fetch_gnews() -> dict:
                     events_created_count += 1
                     event_id = generate_stable_event_id(d_type, state_name, city=city_name, district=district_name, incident_date=incident_date)
 
-                    # Geocoding resolution
-                    lat, lon, precision = None, None, "unknown"
+                    # Geocoding resolution (cached, non-destructive, strictly validated)
+                    lat, lon, precision = None, None, "unresolved"
                     if ENABLE_GEOCODING:
-                        lat, lon, precision = geocode_location(
-                            country="India",
-                            state=state_name,
-                            city=city_name,
-                            district=district_name,
-                        )
-                        if lat is not None and lon is not None:
-                            geocoding_success_count += 1
-                        else:
-                            geocoding_failed_count += 1
+                        try:
+                            lat, lon, precision = geocode_with_cache(
+                                country="India",
+                                state=state_name,
+                                city=city_name,
+                                district=district_name,
+                            )
+                        except Exception as geo_err:
+                            lat, lon, precision = None, None, "unresolved"
+
+                    has_coords = is_valid_coordinate(lat, lon)
+                    loc_status = precision if has_coords else "unresolved"
+                    if has_coords:
+                        geocoding_success_count += 1
+                    else:
+                        geocoding_failed_count += 1
+                        lat, lon = None, None
 
                     evidence_list = res.get("evidence") or []
                     if not evidence_list and art.get("quality_score", {}).get("evidence"):
@@ -943,6 +951,8 @@ def fetch_gnews() -> dict:
                             "tier": tier,
                             "article_type": res.get("article_type", "CURRENT_INCIDENT"),
                         },
+                        "has_coordinates": has_coords,
+                        "location_status": loc_status,
                         "location": {
                             "country": "India",
                             "state": state_name,
@@ -951,6 +961,8 @@ def fetch_gnews() -> dict:
                             "latitude": lat,
                             "longitude": lon,
                             "precision": precision,
+                            "has_coordinates": has_coords,
+                            "location_status": loc_status,
                         },
                         "incident_date": incident_date or (art.get("published_at")[:10] if art.get("published_at") else None),
                         "reason": res.get("reason", ""),

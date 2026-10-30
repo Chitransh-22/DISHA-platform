@@ -148,6 +148,12 @@ export const fetchEvents = async (params = {}) => {
   if (params.state) {
     query.append('state', params.state);
   }
+  if (params.district) {
+    query.append('district', params.district);
+  }
+  if (params.city) {
+    query.append('city', params.city);
+  }
   if (params.start_date || params.startDate) {
     query.append('start_date', params.start_date || params.startDate);
   }
@@ -300,57 +306,67 @@ async function fetchEventsFallback(baseUrl) {
         if (typeof lat === 'string') lat = parseFloat(lat);
         if (typeof lon === 'string') lon = parseFloat(lon);
 
-        if ((lat == null || lon == null || isNaN(lat) || isNaN(lon)) && news.location?.state) {
-          const stName = news.location.state.toLowerCase();
-          if (STATE_CENTROIDS[stName]) {
-            lat = STATE_CENTROIDS[stName].lat;
-            lon = STATE_CENTROIDS[stName].lon;
-          }
-        }
+        const isValidCoord =
+          typeof lat === 'number' &&
+          typeof lon === 'number' &&
+          !isNaN(lat) &&
+          !isNaN(lon) &&
+          lat >= -90 &&
+          lat <= 90 &&
+          lon >= -180 &&
+          lon <= 180 &&
+          !(Math.abs(lat - 20.5937) < 0.01 && Math.abs(lon - 78.9629) < 0.01) &&
+          !(lat === 0 && lon === 0);
 
-        if (typeof lat === 'number' && typeof lon === 'number' && !isNaN(lat) && !isNaN(lon)) {
-          const rawType = (news.disaster_type || 'other').toLowerCase();
-          let cat = 'Other';
-          if (rawType.includes('flood')) cat = 'Flood';
-          else if (rawType.includes('landslide')) cat = 'Landslide';
-          else if (rawType.includes('rain')) cat = 'Heavy Rain';
-          else if (rawType.includes('fire')) cat = 'Fire';
-          else if (rawType.includes('earthquake')) cat = 'Earthquake';
-          else if (rawType.includes('cloudburst')) cat = 'Cloudburst';
-          else if (rawType.includes('building')) cat = 'Building Collapse';
-          else if (rawType.includes('explosion')) cat = 'Explosion';
-          else if (rawType.includes('industrial')) cat = 'Industrial Accident';
+        const finalLat = isValidCoord ? lat : null;
+        const finalLon = isValidCoord ? lon : null;
+        const hasCoords = isValidCoord;
+        const locationStatus = isValidCoord ? 'verified' : 'unresolved';
 
-          const evId = news.event_id || news.article_id || news._id || `news_${idx}_${lat}_${lon}`;
+        const rawType = (news.disaster_type || 'other').toLowerCase();
+        let cat = 'Other';
+        if (rawType.includes('flood')) cat = 'Flood';
+        else if (rawType.includes('landslide')) cat = 'Landslide';
+        else if (rawType.includes('rain')) cat = 'Heavy Rain';
+        else if (rawType.includes('fire')) cat = 'Fire';
+        else if (rawType.includes('earthquake')) cat = 'Earthquake';
+        else if (rawType.includes('cloudburst')) cat = 'Cloudburst';
+        else if (rawType.includes('building')) cat = 'Building Collapse';
+        else if (rawType.includes('explosion')) cat = 'Explosion';
+        else if (rawType.includes('industrial')) cat = 'Industrial Accident';
 
-          events.push({
-            id: evId,
-            title: (news.title || `${cat} Incident`).slice(0, 140),
-            description: news.description || 'Verified multi-source disaster news report.',
-            category: cat,
-            raw_category: rawType,
-            latitude: lat,
-            longitude: lon,
-            date: news.published_at ? news.published_at.split('T')[0] : new Date().toISOString().split('T')[0],
-            time: news.published_at ? new Date(news.published_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Verified',
-            datetime: news.published_at || new Date().toISOString(),
-            timestamp: news.processed_at ? new Date(news.processed_at).getTime() / 1000 : Date.now() / 1000,
-            location: news.location?.district || news.location?.state || 'Affected Area',
-            state: news.location?.state || '',
-            district: news.location?.district || '',
-            city: news.location?.city || '',
-            severity: news.severity ? news.severity.charAt(0).toUpperCase() + news.severity.slice(1) : 'Moderate',
-            status: news.status || 'Active',
-            source: 'GNEWS',
-            source_group: 'news',
-            source_label: 'Verified Disaster Intelligence',
-            source_url: news.url || '',
-            image: news.image || null,
-            helpline: '1070 / 112',
-            response_units: ['District Disaster Management Authority (DDMA)'],
-          });
-          newsCount++;
-        }
+        const evId = news.event_id || news.article_id || news._id || `news_${idx}_${finalLat}_${finalLon}`;
+
+        events.push({
+          id: evId,
+          title: (news.title || `${cat} Incident`).slice(0, 140),
+          description: news.description || 'Verified multi-source disaster news report.',
+          category: cat,
+          raw_category: rawType,
+          latitude: finalLat,
+          longitude: finalLon,
+          has_coordinates: hasCoords,
+          location_status: locationStatus,
+          is_mappable: hasCoords,
+          date: news.published_at ? news.published_at.split('T')[0] : new Date().toISOString().split('T')[0],
+          time: news.published_at ? new Date(news.published_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Verified',
+          datetime: news.published_at || new Date().toISOString(),
+          timestamp: news.processed_at ? new Date(news.processed_at).getTime() / 1000 : Date.now() / 1000,
+          location: news.location?.district || news.location?.state || 'Affected Area',
+          state: news.location?.state || '',
+          district: news.location?.district || '',
+          city: news.location?.city || '',
+          severity: news.severity ? news.severity.charAt(0).toUpperCase() + news.severity.slice(1) : 'Moderate',
+          status: news.status || 'Active',
+          source: 'GNEWS',
+          source_group: 'news',
+          source_label: 'Verified Disaster Intelligence',
+          source_url: news.url || '',
+          image: news.image || null,
+          helpline: '1070 / 112',
+          response_units: ['District Disaster Management Authority (DDMA)'],
+        });
+        newsCount++;
       });
     }
 
@@ -800,3 +816,68 @@ export const fetchNewsDetail = async (newsId) => {
 
 
 
+
+/**
+ * Fetches filtered disaster news for the Alert Page and geographic views.
+ * Queries /api/news/disasters with state, district, city, range, category, severity, limit, skip.
+ * Supports AbortController via options.signal.
+ * 
+ * @param {Object} params - { state, district, city, range, category, severity, limit, skip }
+ * @param {Object} [options] - fetch options such as { signal }
+ * @returns {Promise<{
+ *   status: string,
+ *   selected_area: { level: string, state: string|null, district: string|null, city: string|null, name: string },
+ *   total: number,
+ *   mappable_count: number,
+ *   unresolved_count: number,
+ *   verified_alerts: Array,
+ *   unresolved_news: Array,
+ *   disasters: Array
+ * }>}
+ */
+export const fetchDisasterNews = async (params = {}, options = {}) => {
+  const baseUrl = getApiBaseUrl();
+  const query = new URLSearchParams();
+
+  const timeRange = params.range || params.time_range || (params.days ? `${params.days}d` : '30d');
+  query.append('range', timeRange);
+
+  if (params.state && params.state !== 'All India' && params.state !== 'India' && params.state !== 'All') {
+    query.append('state', params.state);
+  }
+  if (params.district) {
+    query.append('district', params.district);
+  }
+  if (params.city) {
+    query.append('city', params.city);
+  }
+  if (params.category && params.category !== 'All') {
+    query.append('category', params.category);
+  }
+  if (params.severity && params.severity !== 'All') {
+    query.append('severity', params.severity);
+  }
+  if (params.limit) {
+    query.append('limit', params.limit);
+  }
+  if (params.skip) {
+    query.append('skip', params.skip);
+  }
+
+  const queryString = query.toString() ? `?${query.toString()}` : '';
+  const url = `${baseUrl}/api/news/disasters${queryString}`;
+
+  const fetchOpts = {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+    },
+    ...options,
+  };
+
+  const response = await fetch(url, fetchOpts);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch disaster news (Status ${response.status})`);
+  }
+  return await response.json();
+};

@@ -26,6 +26,8 @@ from app.services.events_service import (
     parse_time_range_bounds,
     get_unified_events,
 )
+from app.routes.events import list_unified_events
+from app.routes.analysis import get_analysis_overview, get_analysis_data
 
 
 # ============================================================================
@@ -201,8 +203,7 @@ def test_live_data_integrity_invariant_all_ranges():
 # 4. END-TO-END ENDPOINT PARITY & RECONCILIATION
 # ============================================================================
 
-@pytest.mark.asyncio
-async def test_endpoint_count_reconciliation():
+def test_endpoint_count_reconciliation():
     """
     Verify complete parity between:
     - /api/events
@@ -210,39 +211,29 @@ async def test_endpoint_count_reconciliation():
     - /api/analysis/data
     All 3 must return the exact same total and source breakdown for each time range.
     """
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        for r in ["24h", "7d", "15d", "30d", "all"]:
-            res_events = await client.get(f"/api/events?time_range={r}&limit=5000")
-            assert res_events.status_code == 200
-            data_events = res_events.json()
+    for r in ["24h", "7d", "15d", "30d", "all"]:
+        data_events = list_unified_events(time_range=r, limit=5000)
+        data_overview = get_analysis_overview(time_range=r)
+        data_analysis = get_analysis_data(time_window=r, limit=5000)
 
-            res_overview = await client.get(f"/api/analysis/overview?time_range={r}")
-            assert res_overview.status_code == 200
-            data_overview = res_overview.json()
+        total_events = data_events["total"]
+        total_overview = data_overview["kpis"]["total_verified_events"]
+        total_analysis = data_analysis["total"]
 
-            res_analysis_data = await client.get(f"/api/analysis/data?time_window={r}&limit=5000")
-            assert res_analysis_data.status_code == 200
-            data_analysis = res_analysis_data.json()
+        assert total_events == total_overview == total_analysis, (
+            f"Count mismatch in range '{r}': /api/events={total_events}, "
+            f"/api/analysis/overview={total_overview}, /api/analysis/data={total_analysis}"
+        )
 
-            total_events = data_events["total"]
-            total_overview = data_overview["kpis"]["total_verified_events"]
-            total_analysis = data_analysis["total"]
+        # Check source breakdown parity
+        ev_sources = data_events.get("source_counts", {})
+        ov_sources = data_overview.get("source_counts", {})
+        an_sources = data_analysis.get("source_counts", {})
 
-            assert total_events == total_overview == total_analysis, (
-                f"Count mismatch in range '{r}': /api/events={total_events}, "
-                f"/api/analysis/overview={total_overview}, /api/analysis/data={total_analysis}"
-            )
-
-            # Check source breakdown parity
-            ev_sources = data_events.get("source_counts", {})
-            ov_sources = data_overview.get("source_counts", {})
-            an_sources = data_analysis.get("source_counts", {})
-
-            assert ev_sources.get("earthquakes", 0) == ov_sources.get("earthquakes", 0) == an_sources.get("earthquakes", 0)
-            assert ev_sources.get("sachet", 0) == ov_sources.get("sachet", 0) == an_sources.get("sachet", 0)
-            assert ev_sources.get("news", 0) == ov_sources.get("news", 0) == an_sources.get("news", 0)
-            assert ev_sources.get("citizen_reports", 0) == ov_sources.get("citizen_reports", 0) == an_sources.get("citizen_reports", 0)
+        assert ev_sources.get("earthquakes", 0) == ov_sources.get("earthquakes", 0) == an_sources.get("earthquakes", 0)
+        assert ev_sources.get("sachet", 0) == ov_sources.get("sachet", 0) == an_sources.get("sachet", 0)
+        assert ev_sources.get("news", 0) == ov_sources.get("news", 0) == an_sources.get("news", 0)
+        assert ev_sources.get("citizen_reports", 0) == ov_sources.get("citizen_reports", 0) == an_sources.get("citizen_reports", 0)
 
 
 # ============================================================================

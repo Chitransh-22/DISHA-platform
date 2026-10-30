@@ -46,7 +46,7 @@ pipeline_runs = db["pipeline_runs"]
 
 
 @router.get("/overview", summary="Executive Disaster Intelligence KPI Summary")
-async def get_analysis_overview(
+def get_analysis_overview(
     time_range: Optional[str] = Query(
         None,
         description="Time filter ('24h', '7d', '15d', '30d', 'all', 'custom'). Default: '24h'",
@@ -222,7 +222,7 @@ async def get_analysis_overview(
 
 
 @router.get("/data", summary="Multi-Criteria Filtered Events & Intelligence Feeds")
-async def get_analysis_data(
+def get_analysis_data(
     disaster_type: Optional[str] = Query(None, description="Filter by hazard type"),
     state: Optional[str] = Query(None, description="Filter by Indian State/UT"),
     severity: Optional[str] = Query(None, description="Filter by severity level"),

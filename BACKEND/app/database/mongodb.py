@@ -26,6 +26,7 @@ if not MONGO_URI:
 client = MongoClient(
     MONGO_URI,
     serverSelectionTimeoutMS=5000,
+    readPreference="secondaryPreferred",
 )
 
 
