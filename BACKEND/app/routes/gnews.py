@@ -24,7 +24,13 @@ from app.services.events_service import (
     map_category,
     map_severity,
     map_status,
+    parse_time_range_bounds,
     parse_time_range_cutoff,
+)
+from app.services.geo_filter_service import (
+    is_valid_coordinate,
+    normalize_geographic_query,
+    evaluate_event_geographic_match,
 )
 
 router = APIRouter(
@@ -104,8 +110,11 @@ def _format_news_summary(doc: dict) -> dict:
         "location": loc_str,
         "state": loc.get("state") if isinstance(loc, dict) else "",
         "district": loc.get("district") if isinstance(loc, dict) else "",
-        "latitude": lat,
-        "longitude": lng,
+        "latitude": float(lat) if is_valid_coordinate(lat, lng) else None,
+        "longitude": float(lng) if is_valid_coordinate(lat, lng) else None,
+        "has_coordinates": is_valid_coordinate(lat, lng),
+        "location_status": (loc.get("precision") if isinstance(loc, dict) and loc.get("precision") else doc.get("location_status")) if is_valid_coordinate(lat, lng) else "unresolved",
+        "is_mappable": is_valid_coordinate(lat, lng),
         "date": d_str,
         "time": t_str,
         "datetime": iso_dt,
@@ -177,11 +186,14 @@ async def get_news_sources() -> Dict[str, Any]:
 
 
 @router.get("/recent", summary="Retrieve clean list of recent verified disaster news")
-async def get_recent_news(
+def get_recent_news(
     time_range: Optional[str] = Query("24h", alias="range", description="Time filter ('24h', '7d', '15d', '30d', 'all'). Default: '24h'"),
     category: Optional[str] = Query(None, description="Filter by disaster category"),
     severity: Optional[str] = Query(None, description="Filter by severity"),
     source: Optional[str] = Query(None, description="Filter by news source agency"),
+    state: Optional[str] = Query(None, description="Filter by Indian State"),
+    district: Optional[str] = Query(None, description="Filter by District"),
+    city: Optional[str] = Query(None, description="Filter by City or Local Area"),
     limit: int = Query(20, ge=1, le=100, description="Max news records to return"),
     skip: int = Query(0, ge=0, description="Pagination skip offset"),
 ):
@@ -189,6 +201,26 @@ async def get_recent_news(
     Returns time-filtered, source-filtered, paginated recent disaster news items
     with summary fields projected for high UI performance.
     """
+    if not isinstance(limit, int):
+        try:
+            limit = int(limit)
+        except Exception:
+            limit = 20
+    if not isinstance(skip, int):
+        try:
+            skip = int(skip)
+        except Exception:
+            skip = 0
+
+    category = category if isinstance(category, str) else None
+    severity = severity if isinstance(severity, str) else None
+    source = source if isinstance(source, str) else None
+    state = state if isinstance(state, str) else None
+    district = district if isinstance(district, str) else None
+    city = city if isinstance(city, str) else None
+    if not isinstance(time_range, str):
+        time_range = "24h"
+
     cutoff_info, canonical_range = parse_time_range_cutoff(time_range)
 
     query: Dict[str, Any] = {}
@@ -243,11 +275,24 @@ async def get_recent_news(
 
     items = [_format_news_summary(d) for d in raw_docs]
 
+    geo_area = normalize_geographic_query(country="India", state=state, district=district, city=city)
+    if geo_area["level"] != "country":
+        items = [it for it in items if evaluate_event_geographic_match(it, geo_area)["is_match"]]
+        total_matching = len(items)
+
     # Sort descending by timestamp
     items.sort(key=lambda x: x.get("timestamp", 0.0), reverse=True)
 
     return {
         "status": "success",
+        "selected_area": {
+            "level": geo_area["level"],
+            "country": "India",
+            "state": geo_area["state"],
+            "district": geo_area["district"],
+            "city": geo_area["city"],
+            "name": geo_area["display_name"],
+        },
         "time_range": canonical_range,
         "total": total_matching,
         "count": len(items),
@@ -273,35 +318,126 @@ async def fetch_news_route(
 
 
 @router.get("/disasters")
-async def get_disasters(
-    disaster_type: Optional[str] = Query(None, description="Filter by disaster type (e.g. flood, landslide)"),
-    state: Optional[str] = Query(None, description="Filter by state name"),
+def get_disasters(
+    disaster_type: Optional[str] = Query(None, alias="category", description="Filter by disaster category"),
+    state: Optional[str] = Query(None, description="Filter by Indian State"),
+    district: Optional[str] = Query(None, description="Filter by District"),
+    city: Optional[str] = Query(None, description="Filter by City or Local Area"),
     severity: Optional[str] = Query(None, description="Filter by severity (critical, high, medium, low)"),
-    limit: int = Query(50, ge=1, le=200, description="Max records to return"),
+    time_range: Optional[str] = Query("all", alias="range", description="Time filter ('24h', '7d', '15d', '30d', 'all')"),
+    limit: int = Query(50, ge=1, le=500, description="Max records to return"),
     skip: int = Query(0, ge=0, description="Records to skip"),
 ):
     """
-    Retrieve classified disaster events stored in the database.
+    Retrieve classified disaster events with strict geographic resolution,
+    administrative hierarchy support (India -> State -> District -> City),
+    and separation of verified map alerts from location-unverified news.
     """
-    query = {}
-    if isinstance(disaster_type, str) and disaster_type:
-        query["disaster_type"] = disaster_type.lower()
-    if isinstance(state, str) and state:
-        query["location.state"] = {"$regex": state, "$options": "i"}
-    if isinstance(severity, str) and severity:
-        query["severity"] = severity.lower()
+    if not isinstance(disaster_type, str):
+        disaster_type = ""
+    if not isinstance(severity, str):
+        severity = ""
+    if not isinstance(state, str):
+        state = None
+    if not isinstance(district, str):
+        district = None
+    if not isinstance(city, str):
+        city = None
+    if not isinstance(time_range, str):
+        time_range = "all"
+    if not isinstance(limit, int):
+        try:
+            limit = int(limit)
+        except Exception:
+            limit = 50
+    if not isinstance(skip, int):
+        try:
+            skip = int(skip)
+        except Exception:
+            skip = 0
 
-    lim = limit if isinstance(limit, int) else 50
-    skp = skip if isinstance(skip, int) else 0
+    geo_area = normalize_geographic_query(country="India", state=state, district=district, city=city)
+    start_epoch, end_epoch, start_iso, end_iso, canonical_range = parse_time_range_bounds(time_range)
 
-    cursor = disaster_events.find(query, {"_id": 0}).sort("processed_at", -1).skip(skp).limit(lim)
-    events = list(cursor)
-    total = disaster_events.count_documents(query)
+    query: Dict[str, Any] = {}
+    if start_iso is not None and end_iso is not None:
+        start_dt_str = datetime.fromtimestamp(start_epoch, tz=timezone.utc).strftime("%Y-%m-%d")
+        end_dt_str = datetime.fromtimestamp(end_epoch, tz=timezone.utc).strftime("%Y-%m-%d")
+        query["$or"] = [
+            {"processed_at": {"$gte": start_iso, "$lt": end_iso}},
+            {"first_seen_at": {"$gte": start_iso, "$lt": end_iso}},
+            {"published_at": {"$gte": start_iso, "$lt": end_iso}},
+            {"incident_date": {"$gte": start_dt_str, "$lte": end_dt_str}},
+        ]
+
+    cat_req = (disaster_type or "").strip().lower()
+    if cat_req and cat_req not in ["all", ""]:
+        query["disaster_type"] = {"$regex": f"^{re.escape(cat_req)}$", "$options": "i"}
+
+    sev_req = (severity or "").strip().lower()
+    if sev_req and sev_req not in ["all", ""]:
+        query["severity"] = {"$regex": f"^{re.escape(sev_req)}$", "$options": "i"}
+
+    # Fetch candidate documents
+    cursor = disaster_events.find(query, {"_id": 0}).sort("processed_at", -1)
+    raw_docs = list(cursor)
+
+    matching_disasters = []
+    verified_alerts = []
+    unresolved_news = []
+
+    for doc in raw_docs:
+        summary = _format_news_summary(doc)
+        match_res = evaluate_event_geographic_match(summary, geo_area)
+
+        if match_res["is_match"]:
+            summary["has_coordinates"] = match_res["has_coordinates"]
+            summary["location_status"] = match_res["location_status"]
+            summary["is_mappable"] = match_res["is_mappable"]
+            summary["latitude"] = match_res["latitude"]
+            summary["longitude"] = match_res["longitude"]
+            if match_res.get("state"):
+                summary["state"] = match_res["state"]
+            if match_res.get("district"):
+                summary["district"] = match_res["district"]
+
+            matching_disasters.append(summary)
+            if match_res["is_mappable"]:
+                verified_alerts.append(summary)
+            else:
+                unresolved_news.append(summary)
+
+    # Sort descending by timestamp
+    matching_disasters.sort(key=lambda x: x.get("timestamp", 0.0), reverse=True)
+    verified_alerts.sort(key=lambda x: x.get("timestamp", 0.0), reverse=True)
+    unresolved_news.sort(key=lambda x: x.get("timestamp", 0.0), reverse=True)
+
+    paged_disasters = matching_disasters[skip : skip + limit]
 
     return {
-        "total": total,
-        "count": len(events),
-        "disasters": events,
+        "status": "success",
+        "selected_area": {
+            "level": geo_area["level"],
+            "country": "India",
+            "state": geo_area["state"],
+            "district": geo_area["district"],
+            "city": geo_area["city"],
+            "name": geo_area["display_name"],
+            "centroid": geo_area["centroid"],
+            "bbox": geo_area["bbox"],
+        },
+        "time_range": canonical_range,
+        "total": len(matching_disasters),
+        "mappable_count": len(verified_alerts),
+        "unresolved_count": len(unresolved_news),
+        "count": len(paged_disasters),
+        "skip": skip,
+        "limit": limit,
+        "has_more": (skip + len(paged_disasters)) < len(matching_disasters),
+        "disasters": paged_disasters,
+        "verified_alerts": verified_alerts[skip : skip + limit],
+        "unresolved_news": unresolved_news[skip : skip + limit],
+        "all_verified_alerts": verified_alerts,
     }
 
 
@@ -362,7 +498,7 @@ async def get_pipeline_stats():
 
 @router.get("/detail/{news_id}", summary="Retrieve complete details for a single news article")
 @router.get("/{news_id}", summary="Retrieve complete details for a single news article (alias)")
-async def get_news_detail(news_id: str):
+def get_news_detail(news_id: str):
     """
     Retrieves full details, evidence metadata, geospatial data, and corroboration for a single news item.
     """

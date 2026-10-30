@@ -29,7 +29,7 @@ router = APIRouter(
     "",
     summary="Retrieve unified disaster and hazard events for map visualization and analysis",
 )
-async def list_unified_events(
+def list_unified_events(
     time_range: Optional[str] = Query(
         None,
         description="Time filter ('24h', '7d', '15d', '30d', 'all', 'custom'). Default: '24h'",
@@ -75,6 +75,14 @@ async def list_unified_events(
         None,
         description="Filter by Indian State / Region",
     ),
+    district: Optional[str] = Query(
+        None,
+        description="Filter by Indian District",
+    ),
+    city: Optional[str] = Query(
+        None,
+        description="Filter by City or Local Area",
+    ),
     limit: Optional[int] = Query(
         None,
         ge=1,
@@ -106,6 +114,8 @@ async def list_unified_events(
             status=status_filter,
             source=source,
             state=state,
+            district=district,
+            city=city,
             limit=limit,
             skip=skip,
             time_range=effective_range,
