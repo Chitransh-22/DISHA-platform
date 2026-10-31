@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { Browser } from '@capacitor/browser';
+import { isNativePlatform } from '../services/nativeService';
 import {
   authRefreshToken,
   authGetMe,
@@ -184,13 +186,22 @@ export const AuthProvider = ({ children }) => {
   /**
    * Redirects browser to Google OAuth initiate route.
    */
-  const googleLogin = useCallback((target = null) => {
+  const googleLogin = useCallback(async (target = null) => {
     if (target) {
       try {
         sessionStorage.setItem('disha_auth_redirect', target);
       } catch (e) {}
     }
-    window.location.href = authGoogleLoginUrl();
+    const loginUrl = authGoogleLoginUrl();
+    if (isNativePlatform()) {
+      try {
+        await Browser.open({ url: loginUrl, windowName: '_system' });
+        return;
+      } catch (e) {
+        console.warn('[DISHA Native] Browser OAuth fallback:', e);
+      }
+    }
+    window.location.href = loginUrl;
   }, []);
 
   /**

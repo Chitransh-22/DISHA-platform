@@ -62,6 +62,17 @@ dist/
 dist-ssr/
 *.local
 
+# Android & Capacitor Artifacts
+*.apk
+*.aab
+*.keystore
+*.jks
+release-output/
+.gradle/
+**/android/app/build/
+**/android/.gradle/
+**/android/local.properties
+
 # Archives, Bundles & Zips
 *.zip
 *.tar.gz

@@ -1,0 +1,231 @@
+name: Build & Publish DISHA Android Release APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'FRONTEND/**'
+      - '.github/workflows/android-release.yml'
+      - 'version-manifest.json'
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Version Name (e.g. 1.0.1 - leave blank for auto)'
+        required: false
+        default: ''
+      release_notes:
+        description: 'Custom release notes for this update'
+        required: false
+        default: 'Automated release build from GitHub main branch with latest hazard intelligence updates.'
+      is_mandatory:
+        description: 'Mark this update as mandatory for all users'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: android-release-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release-apk:
+    name: Build & Release Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'FRONTEND/package-lock.json'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Determine Version Code & Name
+        id: versioning
+        run: |
+          # Monotonically increasing version code using git rev-list
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          VERSION_CODE=$((COMMIT_COUNT + 100))
+
+          # Version name resolution
+          INPUT_VERSION="${{ github.event.inputs.version_name }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION_NAME="$INPUT_VERSION"
+          else
+            # Extract version from package.json or compute from run number
+            PKG_VERSION=$(node -p "require('./FRONTEND/package.json').version || '1.0.0'")
+            if [ "$PKG_VERSION" = "0.0.0" ]; then
+              VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+            else
+              VERSION_NAME="${PKG_VERSION}.${GITHUB_RUN_NUMBER}"
+            fi
+          fi
+
+          echo "VERSION_CODE=${VERSION_CODE}" >> $GITHUB_OUTPUT
+          echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_OUTPUT
+          echo "Building DISHA Android v${VERSION_NAME} (code ${VERSION_CODE})"
+
+      - name: Install Frontend Dependencies
+        working-directory: FRONTEND
+        run: |
+          npm ci --prefer-offline || npm install
+
+      - name: Build Vite Production Frontend
+        working-directory: FRONTEND
+        env:
+          VITE_API_URL: 'https://disha-platform.onrender.com'
+        run: |
+          npm run build
+
+      - name: Synchronize Capacitor Native Android Platform
+        working-directory: FRONTEND
+        run: |
+          npx cap sync android
+
+      - name: Prepare Android Keystore
+        id: keystore
+        run: |
+          KEYSTORE_PATH="/tmp/disha-release.keystore"
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "Decoding release signing keystore from GitHub Secrets..."
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE_PATH"
+            echo "has_secret_keystore=true" >> $GITHUB_OUTPUT
+            echo "keystore_path=$KEYSTORE_PATH" >> $GITHUB_OUTPUT
+          else
+            echo "ANDROID_KEYSTORE_BASE64 secret not found. Generating secure build keystore for release..."
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -alias "${{ secrets.ANDROID_KEY_ALIAS || 'disha' }}" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'disha-android-secure-key' }}" \
+              -keypass "${{ secrets.ANDROID_KEY_PASSWORD || 'disha-android-secure-key' }}" \
+              -dname "CN=DISHA Platform, OU=Disaster Intelligence, O=DISHA Team, L=New Delhi, ST=Delhi, C=IN"
+            echo "has_secret_keystore=false" >> $GITHUB_OUTPUT
+            echo "keystore_path=$KEYSTORE_PATH" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Release APK with Gradle
+        working-directory: FRONTEND/android
+        env:
+          KEYSTORE_FILE: ${{ steps.keystore.outputs.keystore_path }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'disha-android-secure-key' }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'disha' }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'disha-android-secure-key' }}
+          VERSION_CODE: ${{ steps.versioning.outputs.VERSION_CODE }}
+          VERSION_NAME: ${{ steps.versioning.outputs.VERSION_NAME }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease \
+            -PversionCode="${VERSION_CODE}" \
+            -PversionName="${VERSION_NAME}" \
+            --no-daemon --stacktrace
+
+      - name: Package & Prepare Release Artifacts
+        id: artifacts
+        run: |
+          mkdir -p release-output
+          APK_SRC=$(find FRONTEND/android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+
+          if [ -z "$APK_SRC" ] || [ ! -f "$APK_SRC" ]; then
+            echo "ERROR: Release APK file was not produced!"
+            exit 1
+          fi
+
+          echo "Found compiled release APK at: $APK_SRC"
+          VERSION_NAME="${{ steps.versioning.outputs.VERSION_NAME }}"
+          VERSION_CODE="${{ steps.versioning.outputs.VERSION_CODE }}"
+
+          cp "$APK_SRC" "release-output/disha-release.apk"
+          cp "$APK_SRC" "release-output/disha-v${VERSION_NAME}.apk"
+
+          # Compute SHA-256 Checksum
+          cd release-output
+          SHA256_HASH=$(sha256sum disha-release.apk | awk '{print $1}')
+          echo "$SHA256_HASH  disha-release.apk" > disha-release.apk.sha256
+          cd ..
+
+          echo "SHA256=${SHA256_HASH}" >> $GITHUB_OUTPUT
+
+          # Prepare release manifest JSON
+          NOTES="${{ github.event.inputs.release_notes || 'Official DISHA Android release built from GitHub main branch.' }}"
+          IS_MANDATORY="${{ github.event.inputs.is_mandatory || 'false' }}"
+          DATE_NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          RELEASE_DATE=$(date -u +"%Y-%m-%d")
+
+          cat <<EOF > release-output/version-manifest.json
+          {
+            "appName": "DISHA",
+            "applicationId": "in.disha.app",
+            "versionCode": ${VERSION_CODE},
+            "versionName": "${VERSION_NAME}",
+            "releaseDate": "${RELEASE_DATE}",
+            "publishedAt": "${DATE_NOW}",
+            "releaseNotes": "${NOTES}",
+            "apkUrl": "https://github.com/${{ github.repository }}/releases/download/v${VERSION_NAME}/disha-release.apk",
+            "sha256": "${SHA256_HASH}",
+            "isMandatory": ${IS_MANDATORY},
+            "minSdkVersion": 24,
+            "targetSdkVersion": 34
+          }
+          EOF
+
+          echo "Generated version-manifest.json successfully:"
+          cat release-output/version-manifest.json
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: "v${{ steps.versioning.outputs.VERSION_NAME }}"
+          name: "DISHA Android v${{ steps.versioning.outputs.VERSION_NAME }}"
+          body: |
+            ## 📱 DISHA Disaster Intelligence Android Application (v${{ steps.versioning.outputs.VERSION_NAME }})
+
+            ### 🚀 What's New:
+            ${{ github.event.inputs.release_notes || 'Official DISHA Android release built automatically from GitHub main branch.' }}
+
+            ### 📦 Release Verification:
+            - **Package Name:** `in.disha.app`
+            - **Version Name:** `v${{ steps.versioning.outputs.VERSION_NAME }}`
+            - **Version Code:** `${{ steps.versioning.outputs.VERSION_CODE }}`
+            - **SHA-256 Checksum:** `${{ steps.artifacts.outputs.SHA256 }}`
+
+            ### 📥 Download & Install:
+            Download **`disha-release.apk`** below and tap to install on any Android 7.0+ (API 24+) device.
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            release-output/disha-release.apk
+            release-output/disha-v${{ steps.versioning.outputs.VERSION_NAME }}.apk
+            release-output/version-manifest.json
+            release-output/disha-release.apk.sha256
+
+      - name: Upload Build Artifacts to Workflow Run
+        uses: actions/upload-artifact@v4
+        with:
+          name: disha-android-release-v${{ steps.versioning.outputs.VERSION_NAME }}
+          path: release-output/
+          retention-days: 14

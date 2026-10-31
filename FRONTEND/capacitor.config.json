@@ -1,0 +1,15 @@
+{
+  "appId": "in.disha.app",
+  "appName": "DISHA",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "plugins": {
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#101318"
+    }
+  }
+}
