@@ -97,6 +97,7 @@ def _format_news_summary(doc: dict) -> dict:
     return {
         "id": event_key,
         "event_id": event_key,
+        "article_id": doc.get("article_id") or event_key,
         "db_id": doc_id,
         "title": clean_title,
         "summary": clean_desc[:280] if clean_desc else f"{cat_display} situation report in {loc_str}.",
@@ -119,6 +120,10 @@ def _format_news_summary(doc: dict) -> dict:
         "time": t_str,
         "datetime": iso_dt,
         "timestamp": epoch_ts,
+        "published_at": doc.get("published_at"),
+        "event_time": doc.get("event_time") or iso_dt,
+        "last_updated_at": doc.get("processed_at") or iso_dt,
+        "ingested_at": doc.get("processed_at") or doc.get("first_seen_at") or iso_dt,
     }
 
 

@@ -43,6 +43,7 @@ import {
 } from 'lucide-react';
 import { getCategoryConfig, SEVERITY_CONFIG } from '../../../config/eventConfig';
 import { normalizeEvent } from '../../../utils/eventNormalizer';
+import { openDirections, getDirectionsUrl } from '../../../utils/navigation';
 
 export const IncidentDetailModal = ({ incident: rawIncident, onClose, onFindNearbyServices }) => {
   const contentRef = useRef(null);
@@ -150,7 +151,7 @@ export const IncidentDetailModal = ({ incident: rawIncident, onClose, onFindNear
             id="close-incident-modal-btn"
             onClick={onClose}
             aria-label="Close Full Situation Brief"
-            className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-colors z-10 cursor-pointer shrink-0 ml-2"
+            className="text-slate-400 hover:text-white p-2.5 rounded-xl hover:bg-white/10 transition-colors z-10 cursor-pointer shrink-0 ml-2 min-w-[44px] min-h-[44px] flex items-center justify-center"
           >
             <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
@@ -346,7 +347,7 @@ export const IncidentDetailModal = ({ incident: rawIncident, onClose, onFindNear
 
               {incident.has_coordinates && (
                 <a
-                  href={`https://www.google.com/maps/dir/?api=1&destination=${incident.latitude},${incident.longitude}`}
+                  href={getDirectionsUrl(incident.latitude, incident.longitude, incident.title)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-1 min-w-[200px] bg-white/10 hover:bg-white/20 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 border border-white/15 cursor-pointer text-center"
@@ -451,7 +452,7 @@ export const IncidentDetailModal = ({ incident: rawIncident, onClose, onFindNear
           <div className="flex items-center gap-2">
             {incident.has_coordinates && (
               <a
-                href={`https://www.google.com/maps/dir/?api=1&destination=${incident.latitude},${incident.longitude}`}
+                href={getDirectionsUrl(incident.latitude, incident.longitude, incident.title)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl border border-slate-200 transition-colors hidden sm:inline-flex items-center gap-1.5 cursor-pointer shadow-xs"

@@ -43,6 +43,7 @@ import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../config/even
 import { formatDateTimeIST } from '../utils/dateTime';
 import { normalizeEvent } from '../utils/eventNormalizer';
 import { CitySelector, COUNTRY_OPTION } from '../components/common/CitySelector';
+import { INDIA_SURVEY_OF_INDIA_GEOJSON } from '../data/indiaBoundaryGeojson';
 
 // Haversine formula to compute great-circle distance between two GPS coordinates in kilometers
 function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
@@ -369,16 +370,65 @@ export const AlertsPage = ({ onNavigate }) => {
       maxZoom: 19,
     }).addTo(map);
 
+    // Dedicated pane for Survey of India boundaries below alert markers
+    if (!map.getPane('soiBoundaryPane')) {
+      const soiPane = map.createPane('soiBoundaryPane');
+      soiPane.style.zIndex = '350';
+      soiPane.style.pointerEvents = 'none';
+    }
+
+    try {
+      L.geoJSON(INDIA_SURVEY_OF_INDIA_GEOJSON, {
+        pane: 'soiBoundaryPane',
+        style: (feature) => {
+          const name = feature?.properties?.st_nm || feature?.properties?.NAME_1 || '';
+          const isLadakh = name.toLowerCase().includes('ladakh');
+          const isJK = name.toLowerCase().includes('jammu');
+          const isNorthernUT = isLadakh || isJK;
+          return {
+            color: isNorthernUT ? '#d97706' : '#ea580c',
+            weight: isNorthernUT ? 2.5 : 1.8,
+            opacity: 0.95,
+            fillColor: isNorthernUT ? '#f59e0b' : '#ea580c',
+            fillOpacity: isNorthernUT ? 0.08 : 0.02,
+            interactive: false,
+          };
+        },
+      }).addTo(map);
+    } catch (err) {
+      console.warn('[AlertsPage] Survey of India boundary error:', err);
+    }
+
     const markersLayer = L.layerGroup().addTo(map);
     markersLayerRef.current = markersLayer;
 
-    // Invalidate size on container mount & handle window resize
-    const timer = setTimeout(() => {
-      map.invalidateSize();
-    }, 250);
+    // Force size invalidation
+    requestAnimationFrame(() => {
+      try {
+        map.invalidateSize();
+      } catch (e) {}
+    });
+
+    let resizeObserver = null;
+    try {
+      if (mapContainerRef.current) {
+        resizeObserver = new ResizeObserver(() => {
+          requestAnimationFrame(() => {
+            try {
+              mapInstanceRef.current?.invalidateSize({ debounceMoveend: true });
+            } catch (e) {}
+          });
+        });
+        resizeObserver.observe(mapContainerRef.current);
+      }
+    } catch (e) {}
 
     return () => {
-      clearTimeout(timer);
+      if (resizeObserver) {
+        try {
+          resizeObserver.disconnect();
+        } catch (e) {}
+      }
       if (mapInstanceRef.current) {
         try {
           mapInstanceRef.current.remove();

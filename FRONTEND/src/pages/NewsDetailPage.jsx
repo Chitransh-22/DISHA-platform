@@ -19,6 +19,7 @@ import { fetchNewsDetail } from '../services/api';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../config/eventConfig';
 import { formatDateTimeIST } from '../utils/dateTime';
 import { sanitizeNewsDescription } from '../utils/htmlSanitizer';
+import { openDirections, getDirectionsUrl } from '../utils/navigation';
 
 export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
   const [article, setArticle] = useState(initialArticle || null);
@@ -66,22 +67,36 @@ export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
       <div className="max-w-4xl mx-auto w-full space-y-6">
         
         {/* Top Header Navigation */}
-        <div className="flex items-center justify-between gap-4">
-          <button
-            id="back-to-news-btn"
-            onClick={() => onNavigate('news')}
-            className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-sm px-4 py-2.5 rounded-xl shadow-xs border border-slate-200 transition-colors cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Recent News</span>
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              id="back-to-news-btn"
+              onClick={() => onNavigate('news')}
+              className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-sm px-4 py-2.5 rounded-xl shadow-xs border border-slate-200 transition-colors cursor-pointer min-h-[44px]"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Recent News</span>
+            </button>
+          </div>
 
-          <button
-            onClick={() => onNavigate('landing')}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
-          >
-            Go to Home
-          </button>
+          <div className="flex items-center gap-2">
+            {article && article.latitude != null && article.longitude != null && (
+              <button
+                id="view-on-map-top-btn"
+                onClick={() => onNavigate('landing', { focusEvent: article, scrollToMap: true })}
+                className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-xs transition-colors cursor-pointer min-h-[44px]"
+              >
+                <MapPin className="w-4 h-4" />
+                <span>View on Live Map</span>
+              </button>
+            )}
+            <button
+              onClick={() => onNavigate('landing')}
+              className="text-xs font-semibold text-slate-500 hover:text-slate-900 transition-colors cursor-pointer px-3 py-2 min-h-[44px] flex items-center"
+            >
+              Go to Home
+            </button>
+          </div>
         </div>
 
         {/* Loading State */}
@@ -192,6 +207,16 @@ export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
                     ? `${article.latitude.toFixed(4)}° N, ${article.longitude.toFixed(4)}° E`
                     : 'Geocoded Regional Area'}
                 </div>
+                {article.latitude != null && article.longitude != null && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('landing', { focusEvent: article, scrollToMap: true })}
+                    className="text-[11px] font-bold text-orange-600 hover:underline flex items-center gap-1 cursor-pointer pt-0.5"
+                  >
+                    <MapPin className="w-3 h-3" />
+                    <span>Focus on Map →</span>
+                  </button>
+                )}
               </div>
 
               <div className="space-y-1">
@@ -280,22 +305,42 @@ export const NewsDetailPage = ({ newsId, initialArticle, onNavigate }) => {
             )}
 
             {/* External Source Action Button & Helpline Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-4 pt-6 border-t border-slate-100">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-6 border-t border-slate-100">
               
-              {article.source_url ? (
-                <a
-                  href={article.source_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-xs sm:text-sm font-bold rounded-xl transition-all shadow-sm hover:shadow-orange-950/20 cursor-pointer"
+              <div className="flex flex-wrap items-center gap-2.5">
+                {article.source_url && (
+                  <a
+                    href={article.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-xs sm:text-sm font-bold rounded-xl transition-all shadow-sm hover:shadow-orange-950/20 cursor-pointer min-h-[44px]"
+                  >
+                    <span>View Original Source Article</span>
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                )}
+
+                {article.latitude != null && article.longitude != null && (
+                  <button
+                    type="button"
+                    onClick={() => openDirections(article.latitude, article.longitude, article.title)}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-bold rounded-xl transition-all shadow-sm cursor-pointer min-h-[44px]"
+                  >
+                    <Compass className="w-4 h-4 text-orange-400" />
+                    <span>Get Directions to Location</span>
+                  </button>
+                )}
+              </div>
+
+              {article.latitude != null && article.longitude != null && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('landing', { focusEvent: article, scrollToMap: true })}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold text-xs sm:text-sm rounded-xl border border-orange-200 transition-colors cursor-pointer min-h-[44px]"
                 >
-                  <span>View Original Source Article</span>
-                  <ExternalLink className="w-4 h-4" />
-                </a>
-              ) : (
-                <div className="text-xs text-slate-400">
-                  Direct official bulletin ingest
-                </div>
+                  <MapPin className="w-4 h-4 text-orange-600" />
+                  <span>View Incident on Map →</span>
+                </button>
               )}
 
             </div>

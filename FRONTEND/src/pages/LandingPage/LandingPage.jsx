@@ -5,7 +5,15 @@ import { LiveDisasterMap } from './components/LiveDisasterMap';
 import { BottomActionCards } from './components/BottomActionCards';
 import { Footer } from './components/Footer';
 
-export const LandingPage = ({ currentPage, onNavigate, isLoggedIn = false, currentUser = null, onLogout }) => {
+export const LandingPage = ({
+  currentPage,
+  onNavigate,
+  isLoggedIn = false,
+  currentUser = null,
+  onLogout,
+  focusedEvent = null,
+  onClearFocusEvent = null,
+}) => {
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col selection:bg-orange-500 selection:text-white relative overflow-x-clip">
       {/* Subtle Ambient Background Gradients & Grid Texture */}
@@ -18,10 +26,17 @@ export const LandingPage = ({ currentPage, onNavigate, isLoggedIn = false, curre
 
       {/* Main Content */}
       <main className="flex-1 relative z-10">
-        <HeroSection />
+        <HeroSection onNavigate={onNavigate} />
 
         {/* Live Disaster Map Section with Real OpenStreetMap GIS Mapping */}
-        <LiveDisasterMap />
+        <section id="disha-live-map-section">
+          <LiveDisasterMap
+            isVisible={currentPage === 'landing'}
+            onNavigate={onNavigate}
+            focusedEvent={focusedEvent}
+            onClearFocusEvent={onClearFocusEvent}
+          />
+        </section>
 
         {/* Bottom Action Cards */}
         <BottomActionCards onNavigate={onNavigate} />
@@ -32,5 +47,3 @@ export const LandingPage = ({ currentPage, onNavigate, isLoggedIn = false, curre
     </div>
   );
 };
-
-

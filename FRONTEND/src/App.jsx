@@ -11,6 +11,7 @@ import { RecentNewsPage } from './pages/RecentNewsPage';
 import { NewsDetailPage } from './pages/NewsDetailPage';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { NotificationToast } from './components/common/NotificationToast';
+import { MobileBottomNav } from './components/common/MobileBottomNav';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { TimeRangeProvider } from './context/TimeRangeContext';
 
@@ -19,6 +20,7 @@ function AppContent() {
   const [redirectAfterAuth, setRedirectAfterAuth] = useState(null);
   const [selectedNewsId, setSelectedNewsId] = useState(null);
   const [selectedNewsArticle, setSelectedNewsArticle] = useState(null);
+  const [focusedEvent, setFocusedEvent] = useState(null);
   const { user, isLoggedIn, notification, clearNotification, logout } = useAuth();
 
   // If user arrives directly on an auth callback route
@@ -46,9 +48,20 @@ function AppContent() {
       if (extra.newsId) setSelectedNewsId(extra.newsId);
       if (extra.article) setSelectedNewsArticle(extra.article);
       if (extra.redirectTarget) setRedirectAfterAuth(extra.redirectTarget);
+      if (extra.focusEvent) setFocusedEvent(extra.focusEvent);
     }
     setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (extra && typeof extra === 'object' && extra.scrollToMap) {
+      setTimeout(() => {
+        const mapEl = document.getElementById('disha-live-map-section');
+        if (mapEl) {
+          mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   const handleLoginSuccess = () => {
@@ -66,7 +79,7 @@ function AppContent() {
     setCurrentPage('landing');
   };
 
-  const renderContent = () => {
+  const renderSecondaryPage = () => {
     switch (currentPage) {
       case 'map':
         return <ViewMapPage onNavigate={handleNavigate} />;
@@ -106,24 +119,49 @@ function AppContent() {
         );
       case 'nearby':
         return <NearbyIncidentsPage onNavigate={handleNavigate} />;
-      case 'landing':
       default:
-        return (
-          <LandingPage
-            currentPage={currentPage}
-            onNavigate={handleNavigate}
-            isLoggedIn={isLoggedIn}
-            currentUser={user}
-            onLogout={handleLogout}
-          />
-        );
+        return null;
     }
   };
 
   return (
     <ErrorBoundary title="DISHA Application Error">
       <NotificationToast notification={notification} onClose={clearNotification} />
-      {renderContent()}
+      
+      {/* 
+        Keep LandingPage permanently mounted in the DOM to preserve Leaflet map state,
+        zoom level, filters, and avoid destruction/recreation cycles during navigation.
+        Leaflet ResizeObserver in LiveDisasterMap recalculates container dimensions
+        automatically when switching back to display: block.
+      */}
+      <div 
+        id="disha-landing-page-container"
+        className="pb-16 md:pb-0"
+        style={{ display: currentPage === 'landing' ? 'block' : 'none' }}
+      >
+        <LandingPage
+          currentPage={currentPage}
+          onNavigate={handleNavigate}
+          isLoggedIn={isLoggedIn}
+          currentUser={user}
+          onLogout={handleLogout}
+          focusedEvent={focusedEvent}
+          onClearFocusEvent={() => setFocusedEvent(null)}
+        />
+      </div>
+
+      {currentPage !== 'landing' && (
+        <div className="pb-16 md:pb-0">
+          {renderSecondaryPage()}
+        </div>
+      )}
+
+      {/* Adaptive Mobile Bottom Navigation Bar (Visible only on < md screens) */}
+      <MobileBottomNav
+        currentPage={currentPage}
+        onNavigate={handleNavigate}
+        isLoggedIn={isLoggedIn}
+      />
     </ErrorBoundary>
   );
 }
