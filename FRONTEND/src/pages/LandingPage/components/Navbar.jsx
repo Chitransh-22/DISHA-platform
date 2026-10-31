@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { logoEmblemImg } from '../../../assets/images';
 import { useAuth } from '../../../context/AuthContext';
-import { DownloadApkButton } from '../../../components/common/DownloadApkButton';
+// import { DownloadApkButton } from '../../../components/common/DownloadApkButton';
 
 export const Navbar = ({
   currentPage,
@@ -726,8 +726,6 @@ export const Navbar = ({
               shrink-0
             "
           >
-
-            <DownloadApkButton variant="navbar" />
             {isLoggedIn ? (
               <div className="flex items-center gap-2">
                 <button
@@ -909,7 +907,6 @@ export const Navbar = ({
 
             {/* COMPACT SIGN IN / USER BADGE */}
 
-            <DownloadApkButton variant="navbar" className="hidden min-[380px]:flex" />
             {isLoggedIn ? (
               <button
                 id="nav-mobile-user-btn"
@@ -1312,7 +1309,6 @@ export const Navbar = ({
 
             {/* FULL AUTH */}
 
-            <DownloadApkButton variant="drawer" className="mt-2" />
             {isLoggedIn ? (
               <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-white/10">
                 <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm font-semibold">
