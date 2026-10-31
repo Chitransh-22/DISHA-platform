@@ -1,7 +1,4 @@
 import React from 'react';
-import {
-  ShieldCheck,
-} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { heroRescueImg } from '../../../assets/images';
 
@@ -13,7 +10,6 @@ const containerVariants = {
   hidden: {
     opacity: 0,
   },
-
   visible: {
     opacity: 1,
     transition: {
@@ -26,16 +22,15 @@ const containerVariants = {
 const fadeUpVariants = {
   hidden: {
     opacity: 0,
-    y: 20,
-    filter: 'blur(8px)',
+    y: 18,
+    filter: 'blur(6px)',
   },
-
   visible: {
     opacity: 1,
     y: 0,
     filter: 'blur(0px)',
     transition: {
-      duration: 2,
+      duration: 1.2,
       ease: [0.22, 1, 0.36, 1],
     },
   },
@@ -46,13 +41,12 @@ const fadeUpVariants = {
 ========================================================= */
 
 const wordHover = {
-  y: -6,
-  scale: 1.05,
-
+  y: -4,
+  scale: 1.04,
   transition: {
     type: 'spring',
     stiffness: 400,
-    damping: 15,
+    damping: 16,
   },
 };
 
@@ -60,43 +54,55 @@ const wordHover = {
    HERO SECTION
 ========================================================= */
 
-export const HeroSection = () => {
+export const HeroSection = ({ onNavigate }) => {
+  const scrollToMap = () => {
+    const el =
+      document.getElementById('disaster-map-section') ||
+      document.getElementById('disha-live-map-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      window.scrollTo({ top: 400, behavior: 'smooth' });
+    }
+  };
+
   return (
     <section
       className="
         relative
         w-full
         overflow-hidden
-        px-4
+        px-3
         sm:px-6
-        pt-14
-        sm:pt-18
-        lg:pt-20
-        pb-0
-        mb-0
-        mt-10
+        pt-16
+        sm:pt-20
+        lg:pt-22
+        pb-4
+        sm:pb-8
+        mt-2
+        sm:mt-4
       "
     >
-
       {/* =====================================================
-          BACKGROUND ATMOSPHERE
+          BACKGROUND AMBIENT ATMOSPHERE
+          Soft orange-amber glow that gently integrates with
+          the homepage ambient lighting.
       ===================================================== */}
-
       <motion.div
         className="
           absolute
           left-1/2
-          top-20
+          top-16
           -translate-x-1/2
           w-72
           h-72
           sm:w-96
           sm:h-96
-          lg:w-112.5
-          lg:h-112.5
+          lg:w-120
+          lg:h-120
           rounded-full
           bg-orange-500/10
-          blur-[100px]
+          blur-[110px]
           pointer-events-none
         "
         animate={{
@@ -111,27 +117,27 @@ export const HeroSection = () => {
       />
 
       {/* =====================================================
-          HERO CONTAINER
+          HERO COMPOSITION WRAPPER
+          Harmoniously scaled and centered on the homepage.
       ===================================================== */}
-
       <div
         className="
           relative
-          max-w-6xl
+          max-w-5xl
           mx-auto
-          min-h-100
-          sm:min-h-107.5
-          lg:min-h-112.5
+          min-h-[360px]
+          sm:min-h-[410px]
+          lg:min-h-[450px]
           flex
           items-center
           justify-center
         "
       >
-
         {/* ===================================================
-            BACKGROUND RESCUE IMAGE
+            ATMOSPHERIC RESCUE & RADAR CANVAS
+            Features edge-feathered vignette blending so the
+            visual canvas dissolves smoothly into the homepage.
         =================================================== */}
-
         <motion.div
           className="
             absolute
@@ -143,52 +149,46 @@ export const HeroSection = () => {
           "
           initial={{
             opacity: 0,
-            scale: 0.92,
+            scale: 0.96,
           }}
           animate={{
             opacity: 1,
             scale: 1,
           }}
           transition={{
-            duration: 1.4,
+            duration: 1.2,
             ease: [0.22, 1, 0.36, 1],
           }}
         >
-
-          {/* =================================================
-              IMAGE CONTAINER
-          ================================================= */}
-
+          {/* Rescue Image Canvas with subtle border and edge feathering */}
           <div
             className="
               relative
               w-full
-              max-w-5xl
-              h-82.5
-              sm:h-95
-              lg:h-105
-              rounded-3xl
-              sm:rounded-[28px]
+              h-full
+              rounded-2xl
+              sm:rounded-3xl
+              lg:rounded-[28px]
               overflow-hidden
+              border
+              border-white/25
+              shadow-[0_8px_30px_rgba(15,23,42,0.12)]
             "
           >
-
-            {/* =================================================
-                RESCUE IMAGE
-            ================================================= */}
-
+            {/* Rescue Image with subtle grayscale and mix-blend */}
             <motion.img
               src={heroRescueImg}
-              alt=""
+              alt="DISHA Disaster Response Operations"
               className="
                 absolute
                 inset-0
                 w-full
                 h-full
                 object-cover
-                rounded-3xl
-                sm:rounded-[28px]
-                opacity-[0.45]
+                rounded-2xl
+                sm:rounded-3xl
+                lg:rounded-[28px]
+                opacity-[0.42]
                 grayscale
                 mix-blend-multiply
               "
@@ -202,60 +202,52 @@ export const HeroSection = () => {
               }}
             />
 
-            {/* =================================================
-                DARK OVERLAY
-            ================================================= */}
-
+            {/* Dark Slate Overlay for Text Legibility */}
             <div
               className="
                 absolute
                 inset-0
-                rounded-3xl
-                sm:rounded-[28px]
+                rounded-2xl
+                sm:rounded-3xl
+                lg:rounded-[28px]
                 bg-slate-950/35
               "
             />
 
-            {/* =================================================
-                DARK + ORANGE GRADIENT
-            ================================================= */}
-
+            {/* Dark + Orange Ambient Gradient */}
             <div
               className="
                 absolute
                 inset-0
-                rounded-3xl
-                sm:rounded-[28px]
+                rounded-2xl
+                sm:rounded-3xl
+                lg:rounded-[28px]
                 bg-linear-to-br
-                from-slate-950/50
-                via-slate-900/20
-                to-orange-950/50
+                from-slate-950/55
+                via-slate-900/25
+                to-orange-950/55
               "
             />
 
-            {/* =================================================
-                SOFT WHITE BORDER
-            ================================================= */}
-
+            {/* Subtle Inner Glow Border */}
             <div
               className="
                 absolute
                 inset-0
-                rounded-3xl
-                sm:rounded-[28px]
-                border
-                border-white/30
+                rounded-2xl
+                sm:rounded-3xl
+                lg:rounded-[28px]
+                ring-1
+                ring-inset
+                ring-white/20
               "
             />
 
             {/* =================================================
-                CENTER CROSSHAIR
+                TACTICAL RADAR & RESCUE VISUAL ELEMENTS
             ================================================= */}
-
             <div className="absolute inset-0 opacity-30">
-
-              {/* Vertical Line */}
-
+              {/* Vertical Crosshair Line */}
               <div
                 className="
                   absolute
@@ -266,9 +258,7 @@ export const HeroSection = () => {
                   bg-orange-400/40
                 "
               />
-
-              {/* Horizontal Line */}
-
+              {/* Horizontal Crosshair Line */}
               <div
                 className="
                   absolute
@@ -279,21 +269,17 @@ export const HeroSection = () => {
                   bg-orange-400/40
                 "
               />
-
             </div>
 
-            {/* =================================================
-                OUTER RADAR RECTANGLE
-            ================================================= */}
-
+            {/* Outer Radar Rectangle */}
             <motion.div
               className="
                 absolute
                 inset-[6%]
-                rounded-[18px]
+                rounded-[16px]
                 sm:rounded-[22px]
                 border
-                border-orange-500/40
+                border-orange-500/35
               "
               animate={{
                 opacity: [0.35, 0.75, 0.35],
@@ -305,18 +291,15 @@ export const HeroSection = () => {
               }}
             />
 
-            {/* =================================================
-                INNER DASHED RADAR RECTANGLE
-            ================================================= */}
-
+            {/* Inner Dashed Radar Rectangle */}
             <motion.div
               className="
                 absolute
                 inset-[14%]
-                rounded-[15px]
+                rounded-[13px]
                 sm:rounded-[18px]
                 border
-                border-orange-400/30
+                border-orange-400/25
                 border-dashed
               "
               animate={{
@@ -329,17 +312,14 @@ export const HeroSection = () => {
               }}
             />
 
-            {/* =================================================
-                ROTATING ORANGE RADAR HAND
-            ================================================= */}
-
+            {/* Rotating Orange Radar Sweep Hand */}
             <motion.div
               className="
                 absolute
                 left-1/2
-                top-[5%]
+                top-[6%]
                 w-1
-                h-[45%]
+                h-[44%]
                 origin-bottom
                 rounded-full
                 bg-linear-to-t
@@ -358,10 +338,7 @@ export const HeroSection = () => {
               }}
             />
 
-            {/* =================================================
-                BRIGHT CENTER RADAR POINT
-            ================================================= */}
-
+            {/* Bright Center Radar Point */}
             <motion.div
               className="
                 absolute
@@ -388,15 +365,12 @@ export const HeroSection = () => {
               }}
             />
 
-            {/* =================================================
-                SMALL RADAR DOT 1
-            ================================================= */}
-
+            {/* Small Radar Dot 1 */}
             <motion.div
               className="
                 absolute
                 top-[25%]
-                left-[30%]
+                left-[28%]
                 w-1.5
                 h-1.5
                 sm:w-2
@@ -416,10 +390,7 @@ export const HeroSection = () => {
               }}
             />
 
-            {/* =================================================
-                SMALL RADAR DOT 2
-            ================================================= */}
-
+            {/* Small Radar Dot 2 */}
             <motion.div
               className="
                 absolute
@@ -443,14 +414,13 @@ export const HeroSection = () => {
                 ease: 'easeInOut',
               }}
             />
-
           </div>
         </motion.div>
 
         {/* ===================================================
             CENTER CONTENT
+            Original typography, wording, and responsive CTAs.
         =================================================== */}
-
         <motion.div
           className="
             relative
@@ -462,61 +432,44 @@ export const HeroSection = () => {
             flex-col
             items-center
             text-center
-            px-2
-            sm:px-4
+            px-3
+            sm:px-6
+            py-8
+            sm:py-10
+            lg:py-12
           "
           variants={containerVariants}
           initial="hidden"
           animate="visible"
         >
-
-
-          {/* =================================================
-              MAIN HEADING
-          ================================================= */}
-
+          {/* MAIN HEADING */}
           <motion.h1
             variants={fadeUpVariants}
             className="
-              mt-5
-              sm:mt-6
-              text-[30px]
+              text-[26px]
+              xs:text-[30px]
               sm:text-5xl
               lg:text-6xl
-              leading-[1.1]
+              leading-[1.12]
               font-extrabold
               tracking-tight
               text-[#f5f6f9]
               select-none
             "
           >
-
             {/* ROW 1 */}
-
             <span className="block">
-
               <motion.span
-                className="
-                  inline-block
-                  cursor-pointer
-                  text-orange-100
-                "
+                className="inline-block cursor-pointer text-orange-100"
                 whileHover={{
                   ...wordHover,
                   color: '#c2410c',
                 }}
               >
                 Disaster
-              </motion.span>
-
-              {' '}
-
+              </motion.span>{' '}
               <motion.span
-                className="
-                  inline-block
-                  cursor-pointer
-                  text-[#ff5900]
-                "
+                className="inline-block cursor-pointer text-[#ff5900]"
                 whileHover={{
                   ...wordHover,
                   color: '#c2410c',
@@ -524,41 +477,21 @@ export const HeroSection = () => {
               >
                 Intelligence
               </motion.span>
-
             </span>
 
             {/* ROW 2 */}
-
-            <span
-              className="
-                block
-                mt-1
-                sm:mt-2
-              "
-            >
-
+            <span className="block mt-1 sm:mt-2">
               <motion.span
-                className="
-                  inline-block
-                  cursor-pointer
-                  text-orange-100
-                "
+                className="inline-block cursor-pointer text-orange-100"
                 whileHover={{
                   ...wordHover,
                   color: '#c2410c',
                 }}
               >
                 and
-              </motion.span>
-
-              {' '}
-
+              </motion.span>{' '}
               <motion.span
-                className="
-                  inline-block
-                  cursor-pointer
-                  text-orange-100
-                "
+                className="inline-block cursor-pointer text-orange-100"
                 whileHover={{
                   ...wordHover,
                   color: '#c2410c',
@@ -566,41 +499,21 @@ export const HeroSection = () => {
               >
                 Situational
               </motion.span>
-
             </span>
 
             {/* ROW 3 */}
-
-            <span
-              className="
-                block
-                mt-1
-                sm:mt-2
-              "
-            >
-
+            <span className="block mt-1 sm:mt-2">
               <motion.span
-                className="
-                  inline-block
-                  cursor-pointer
-                  text-orange-100
-                "
+                className="inline-block cursor-pointer text-orange-100"
                 whileHover={{
                   ...wordHover,
                   color: '#c2410c',
                 }}
               >
                 Hazard
-              </motion.span>
-
-              {' '}
-
+              </motion.span>{' '}
               <motion.span
-                className="
-                  inline-block
-                  cursor-pointer
-                  text-orange-100
-                "
+                className="inline-block cursor-pointer text-orange-100"
                 whileHover={{
                   ...wordHover,
                   color: '#c2410c',
@@ -608,38 +521,158 @@ export const HeroSection = () => {
               >
                 Awareness
               </motion.span>
-
             </span>
-
           </motion.h1>
 
-          {/* =================================================
-              DESCRIPTION
-          ================================================= */}
-
+          {/* DESCRIPTION */}
           <motion.p
             variants={fadeUpVariants}
             className="
-              mt-4
+              mt-3.5
               sm:mt-5
               max-w-130
               text-xs
               sm:text-sm
               lg:text-base
-              text-orange-50
+              text-orange-50/95
               leading-relaxed
               font-normal
             "
           >
-            Track real-time disasters, view affected areas, and stay
-            informed with intelligent updates across India and
-            neighbouring countries.
+            Track real-time disasters, view affected areas, and stay informed
+            with intelligent updates across India and neighbouring countries.
           </motion.p>
 
-        </motion.div>
+          {/* ACTION BUTTONS (SEAMLESSLY INTEGRATED) */}
+          <motion.div
+            variants={fadeUpVariants}
+            className="flex flex-wrap items-center justify-center gap-3 mt-6 sm:mt-7 w-full z-30"
+          >
+            {/* Primary CTA: Explore Live Map */}
+            <button
+              id="hero-explore-map-btn"
+              onClick={scrollToMap}
+              className="
+                bg-linear-to-r
+                from-[#f26522]
+                to-[#ea580c]
+                hover:from-[#ea580c]
+                hover:to-[#c2410c]
+                text-white
+                font-bold
+                text-xs
+                sm:text-sm
+                py-2.5
+                sm:py-3
+                px-5
+                sm:px-6
+                rounded-full
+                shadow-md
+                shadow-orange-950/25
+                hover:shadow-orange-500/20
+                flex
+                items-center
+                gap-2
+                cursor-pointer
+                active:scale-95
+                hover:-translate-y-0.5
+                transition-all
+                duration-200
+                border
+                border-orange-400/30
+              "
+            >
+              <span>🗺️ Explore Live Map</span>
+            </button>
 
+            {/* Secondary CTA: Report Incident */}
+            <button
+              id="hero-report-incident-btn"
+              onClick={() => onNavigate && onNavigate('report')}
+              className="
+                bg-white/10
+                hover:bg-white/20
+                text-white
+                font-semibold
+                text-xs
+                sm:text-sm
+                py-2.5
+                sm:py-3
+                px-5
+                sm:px-6
+                rounded-full
+                border
+                border-white/25
+                hover:border-white/40
+                flex
+                items-center
+                gap-2
+                cursor-pointer
+                active:scale-95
+                hover:-translate-y-0.5
+                transition-all
+                duration-200
+                backdrop-blur-xs
+              "
+            >
+              <span>🚨 Report Incident</span>
+            </button>
+          </motion.div>
+        </motion.div>
       </div>
 
+      {/* =====================================================
+          SEAMLESS HERO-TO-MAP TRANSITION BRIDGE
+          Subtle visual guide leading downward into the Main
+          Disaster Map section without abrupt boundaries.
+      ===================================================== */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.6, duration: 1 }}
+        onClick={scrollToMap}
+        className="
+          mt-4
+          sm:mt-6
+          flex
+          flex-col
+          items-center
+          justify-center
+          cursor-pointer
+          group
+          select-none
+        "
+      >
+        <span
+          className="
+            text-[11px]
+            sm:text-xs
+            font-medium
+            text-slate-400
+            group-hover:text-orange-600
+            transition-colors
+            duration-200
+            tracking-wider
+            uppercase
+            flex
+            items-center
+            gap-1.5
+          "
+        >
+          <span>Live Disaster Surveillance Map Below</span>
+          <motion.span
+            animate={{ y: [0, 3, 0] }}
+            transition={{
+              duration: 2,
+              repeat: Infinity,
+              ease: 'easeInOut',
+            }}
+            className="text-orange-500 font-bold"
+          >
+            ↓
+          </motion.span>
+        </span>
+      </motion.div>
     </section>
   );
 };

@@ -19,6 +19,7 @@ import { fetchRecentNews, fetchNewsSources } from '../services/api';
 import { EVENT_CONFIG, getCategoryConfig, SEVERITY_CONFIG } from '../config/eventConfig';
 import { formatDateTimeIST } from '../utils/dateTime';
 import { sanitizeNewsDescription } from '../utils/htmlSanitizer';
+import { openDirections, getDirectionsUrl } from '../utils/navigation';
 
 export const RecentNewsPage = ({ onNavigate, onSelectNews }) => {
   const [timeRange, setTimeRange] = useState('24h');
@@ -385,16 +386,34 @@ export const RecentNewsPage = ({ onNavigate, onSelectNews }) => {
                     )}
 
                     {/* Source & Action Row */}
-                    <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 text-xs">
                       <div className="flex items-center gap-1.5 text-slate-500 font-medium truncate max-w-sm">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                         <span>Source: <strong className="text-slate-800">{article.source || 'Verified Disaster Feed'}</strong></span>
                       </div>
 
-                      <span className="inline-flex items-center gap-1 font-bold text-orange-600 group-hover:translate-x-0.5 transition-transform shrink-0">
-                        <span>Read Full Report</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {article.latitude != null && article.longitude != null && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onNavigate) {
+                                onNavigate('landing', { focusEvent: article, scrollToMap: true });
+                              }
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold text-xs border border-orange-200 transition-colors cursor-pointer min-h-[36px]"
+                            title="Locate incident on interactive disaster map"
+                          >
+                            <MapPin className="w-3.5 h-3.5 text-orange-600" />
+                            <span>View on Map</span>
+                          </button>
+                        )}
+                        <span className="inline-flex items-center gap-1 font-bold text-orange-600 group-hover:translate-x-0.5 transition-transform shrink-0 py-1">
+                          <span>Read Full Report</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </span>
+                      </div>
                     </div>
 
                   </div>

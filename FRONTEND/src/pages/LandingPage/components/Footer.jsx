@@ -23,45 +23,7 @@ export const Footer = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* Quick Nav Links (Every link verified to point to an active, working route) */}
-        <nav className="flex flex-wrap items-center justify-center gap-6 font-medium text-slate-300">
-          <button 
-            onClick={() => onNavigate('landing')} 
-            className="hover:text-orange-400 transition-colors cursor-pointer text-xs sm:text-sm"
-          >
-            Home
-          </button>
-          <button 
-            onClick={() => onNavigate('report')} 
-            className="hover:text-orange-400 transition-colors cursor-pointer text-xs sm:text-sm"
-          >
-            Report Incident
-          </button>
-          <button 
-            onClick={() => onNavigate('news')} 
-            className="hover:text-orange-400 transition-colors cursor-pointer text-xs sm:text-sm"
-          >
-            Recent News
-          </button>
-          <button 
-            onClick={() => onNavigate('alerts')} 
-            className="hover:text-orange-400 transition-colors cursor-pointer text-xs sm:text-sm"
-          >
-            Alerts
-          </button>
-          <button 
-            onClick={() => onNavigate('nearby')} 
-            className="hover:text-orange-400 transition-colors cursor-pointer text-xs sm:text-sm"
-          >
-            Nearby Incidents
-          </button>
-          <button 
-            onClick={() => onNavigate('analysis')} 
-            className="hover:text-orange-400 transition-colors cursor-pointer text-xs sm:text-sm text-orange-400 font-semibold"
-          >
-            Analysis
-          </button>
-        </nav>
+       
 
         {/* Emergency Helplines Pill */}
         <div className="flex items-center gap-3 bg-white/5 border border-white/15 px-4 py-2 rounded-2xl shadow-inner">
@@ -78,18 +40,8 @@ export const Footer = ({ onNavigate }) => {
 
       </div>
 
-      {/* Bottom Legal & Integration Bar */}
-      <div className="max-w-7xl mx-auto mt-8 pt-6 border-t border-white/10 text-center text-xs text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-3">
-        <p className="text-slate-400 font-normal">
-          © 2026 DISHA - Disaster Intelligence and Situational Hazard Awareness. All rights reserved.
-        </p>
-        <div className="flex items-center gap-4 text-[11px] text-slate-400">
-          <span className="flex items-center gap-1.5 text-slate-300">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Integrated with National Disaster Management Network</span>
-          </span>
-        </div>
-      </div>
+    
+      
     </footer>
   );
 };

@@ -1010,12 +1010,10 @@ export const Navbar = ({
                 flex
                 items-center
                 justify-center
-                w-8
-                h-8
-                sm:w-9
-                sm:h-9
-                md:w-10
-                md:h-10
+                w-11
+                h-11
+                min-w-[44px]
+                min-h-[44px]
                 text-slate-300
                 hover:text-white
                 hover:bg-white/10
@@ -1030,9 +1028,9 @@ export const Navbar = ({
               aria-expanded={mobileMenuOpen}
             >
               {mobileMenuOpen ? (
-                <X className="w-5 h-5 sm:w-6 sm:h-6" />
+                <X className="w-6 h-6" />
               ) : (
-                <Menu className="w-5 h-5 sm:w-6 sm:h-6" />
+                <Menu className="w-6 h-6" />
               )}
             </button>
 

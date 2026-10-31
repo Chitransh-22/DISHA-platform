@@ -50,12 +50,15 @@ def test_unified_events_endpoint():
     events = data.get("events", [])
     assert len(events) > 0, "No events returned from DB"
 
-    # Verify coordinate integrity
+    # Verify coordinate integrity for mapped events (preserves zero-event-loss invariant for unmapped)
     for ev in events:
-        assert isinstance(ev["latitude"], (int, float)), f"Invalid latitude: {ev['latitude']}"
-        assert isinstance(ev["longitude"], (int, float)), f"Invalid longitude: {ev['longitude']}"
-        assert -90 <= ev["latitude"] <= 90
-        assert -180 <= ev["longitude"] <= 180
+        if ev.get("has_coordinates", False) and ev.get("latitude") is not None:
+            assert isinstance(ev["latitude"], (int, float)), f"Invalid latitude: {ev['latitude']}"
+            assert isinstance(ev["longitude"], (int, float)), f"Invalid longitude: {ev['longitude']}"
+            assert -90 <= ev["latitude"] <= 90
+            assert -180 <= ev["longitude"] <= 180
+        else:
+            assert ev["latitude"] is None or isinstance(ev["latitude"], (int, float))
         assert "id" in ev
         assert "title" in ev
         assert "category" in ev

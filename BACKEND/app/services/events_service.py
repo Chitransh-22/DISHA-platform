@@ -67,19 +67,19 @@ def normalize_event_time(ev: dict) -> Optional[Tuple[str, float, str, str]]:
             ts = dt.timestamp()
             return dt.isoformat(), ts, dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M UTC")
 
-    # 3. Check candidate timestamp string fields
+    # 3. Check candidate timestamp string fields (prioritize timestamp with time-of-day over date-only strings)
     candidate_strs = [
-        ev.get("date"),
-        ev.get("datetime"),
         ev.get("origin_time"),
         ev.get("event_time"),
-        ev.get("effective_at"),
-        ev.get("incident_date"),
+        ev.get("datetime"),
         ev.get("published_at"),
-        ev.get("sent_at"),
         ev.get("processed_at"),
         ev.get("created_at"),
         ev.get("first_seen_at"),
+        ev.get("effective_at"),
+        ev.get("sent_at"),
+        ev.get("incident_date"),
+        ev.get("date"),
     ]
 
     for raw in candidate_strs:
@@ -716,6 +716,8 @@ def get_unified_events(
 
                 all_events.append({
                     "id": event_key,
+                    "event_id": event_key,
+                    "article_id": ev.get("article_id") or event_key,
                     "db_id": doc_id,
                     "title": title[:140],
                     "description": desc,
@@ -768,6 +770,7 @@ def get_unified_events(
                     "$or": [
                         {"processed_at": {"$gte": start_iso, "$lt": end_iso}},
                         {"first_seen_at": {"$gte": start_iso, "$lt": end_iso}},
+                        {"published_at": {"$gte": start_iso, "$lt": end_iso}},
                         {"incident_date": {"$gte": start_dt_str, "$lte": end_dt_str}},
                     ]
                 }
@@ -831,6 +834,8 @@ def get_unified_events(
 
                 all_events.append({
                     "id": event_key,
+                    "event_id": event_key,
+                    "article_id": ev.get("article_id") or event_key,
                     "db_id": doc_id,
                     "title": title[:140],
                     "description": desc,
@@ -857,6 +862,10 @@ def get_unified_events(
                     "image": ev.get("image") or None,
                     "helpline": "1070 / 112",
                     "response_units": ["District Disaster Management Authority (DDMA)", "Local First Responders"],
+                    "published_at": ev.get("published_at"),
+                    "event_time": ev.get("event_time") or iso_dt,
+                    "last_updated_at": ev.get("processed_at") or iso_dt,
+                    "ingested_at": ev.get("processed_at") or ev.get("first_seen_at") or iso_dt,
                     "metadata": {
                         "confidence": ev.get("confidence"),
                         "incident_date": ev.get("incident_date"),
@@ -929,6 +938,8 @@ def get_unified_events(
 
                 all_events.append({
                     "id": event_key,
+                    "event_id": event_key,
+                    "article_id": ev.get("article_id") or event_key,
                     "db_id": doc_id,
                     "title": title[:140],
                     "description": desc,
