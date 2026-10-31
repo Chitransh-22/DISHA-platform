@@ -1,506 +1,599 @@
-# DISHA-PLATFORM
+# DISHA — Disaster Intelligence and Situational Hazard Awareness Platform
 
-**Disaster Intelligence and Situational Hazard Awareness Platform** — a full-stack web application that aggregates, verifies, and visualizes real-time disaster and emergency data for India, combining government data feeds, AI-assisted news verification, and citizen incident reporting on an interactive map.
+DISHA is a full-stack web application that collects disaster and emergency information for India from several sources, normalizes it into one event model, and shows it on an interactive map and in analytics views. The sources are the National Center for Seismology (earthquakes), NDMA SACHET (official CAP alerts), news headlines classified by Google's Gemini API, and reports submitted by signed-in citizens.
 
-Live deployment: [disha-platform.vercel.app](https://disha-platform.vercel.app) (frontend) · API on Render (backend)
+> **Status: academic / hackathon-grade project.** It is not an official source of emergency information. For decisions that affect safety, use NDMA, IMD, NCS and your local authorities. See [Disclaimer](#disclaimer) and [Known Limitations](#known-limitations).
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Problem Statement and Objectives](#problem-statement-and-objectives)
+3. [Features and Implementation Status](#features-and-implementation-status)
+4. [System Architecture](#system-architecture)
+5. [Technology Stack](#technology-stack)
+6. [Data Sources and External Integrations](#data-sources-and-external-integrations)
+7. [AI and Heuristic Methodology](#ai-and-heuristic-methodology)
+8. [Complete Data Flow](#complete-data-flow)
+9. [Project Directory Structure](#project-directory-structure)
+10. [Installation and Local Development](#installation-and-local-development)
+11. [Configuration Reference](#configuration-reference)
+12. [API Reference](#api-reference)
+13. [Database Architecture](#database-architecture)
+14. [Deployment](#deployment)
+15. [Screenshots and Demo](#screenshots-and-demo)
+16. [Testing](#testing)
+17. [Known Limitations](#known-limitations)
+18. [Future Scope](#future-scope)
+19. [Team and Contributors](#team-and-contributors)
+20. [License](#license)
+21. [Disclaimer](#disclaimer)
 
 ---
 
 ## Overview
 
-DISHA ingests disaster-related information from multiple official and open sources — India's National Center for Seismology (earthquakes), NDMA's SACHET alert system (government warnings), and news feeds cross-checked by Google's Gemini model — and unifies them into a single, filterable event feed. It also lets signed-in citizens submit their own incident reports with location and photo evidence, and surfaces nearby emergency services (hospitals, police, fire stations) for a given location.
+The repository is a monorepo with two deployable parts:
 
-The project is organized as a two-service monorepo:
+| Part | Path | Role |
+|---|---|---|
+| Backend | [`BACKEND/`](./BACKEND) | FastAPI service: ingestion pipelines, scheduler, REST API, authentication, MongoDB access |
+| Frontend | [`FRONTEND/`](./FRONTEND) | React single-page application: live map, alerts, news, analytics, incident reporting |
 
-- **`BACKEND/`** — a Python FastAPI service that runs the data-ingestion pipelines, exposes a REST API, and talks to MongoDB.
-- **`FRONTEND/`** — a React + Vite single-page application that consumes the API and renders the map, dashboards, and forms.
+Production URLs referenced in the code are `https://disha-platform.vercel.app` (frontend, set as a default CORS origin and OAuth redirect target) and `https://disha-platform.onrender.com` (backend, used as the production fallback API URL). The repository cannot confirm that these deployments are currently live.
 
----
+## Problem Statement and Objectives
 
-## Key Features
+Disaster information in India is spread across government feeds, seismology portals and news coverage, in inconsistent formats and with uneven location data. DISHA's code addresses this with the following objectives, each of which maps to implemented functionality:
 
-**Implemented and verified in the repository:**
+- **Aggregate** earthquakes, official alerts, verified news incidents and citizen reports in one event feed (`/api/events`).
+- **Filter noise** from news (sports, metaphors, forecasts without impact, foreign events, old incidents) before and after AI classification.
+- **Avoid silently dropping events**: events without coordinates are kept and counted as "unmapped" (`T = M + U` invariant, covered by `tests/test_data_consistency.py`).
+- **Help locate help**: look up nearby hospitals, police and fire stations for an event, with directions links.
+- **Let citizens report** incidents with location and photos (requires sign-in).
 
-- **Unified disaster event feed** (`/api/events`) merging earthquakes, NDMA SACHET alerts, and AI-verified news into one normalized dataset.
-- **Live interactive map** on the landing page (`LiveDisasterMap.jsx`) built directly on the core [Leaflet](https://leafletjs.com/) library, with severity/category styling, time-range filtering, and an emergency-services overlay.
-- **Earthquake ingestion** from the official NCS RISEQ portal (`app/sources/riseq.py`), with UTC normalization and India-relevance filtering.
-- **NDMA SACHET CAP alert ingestion** (`app/sources/sachet.py`) — parses the official RSS/CAP XML feed with ETag caching and polygon extraction.
-- **AI-assisted news verification pipeline** (`fetch_gnews.py` + `gemini_controller.py`) — pulls news via RSS/feedparser, then classifies/verifies candidate disaster events using the Gemini API (quota-managed with automatic model fallback), combined with a custom source-scoring and temporal-recency scoring system, and offline geocoding of Indian states/districts/known hotspots.
-- **Citizen incident reporting** — authenticated users can submit incident reports (event type, description, photo evidence, geolocation) via `POST /api/incidents/report`, view their own submissions, and browse recent reports.
-- **Nearby emergency services lookup** — queries the OpenStreetMap **Overpass API** for hospitals, police, and fire stations near a coordinate, with Haversine-distance ranking, multi-endpoint fallback, and in-memory TTL caching.
-- **Google OAuth2 authentication** with JWT access/refresh tokens, server-side session storage in MongoDB, and refresh-token rotation.
-- **Analytics/KPI overview** endpoints for a dashboard summary of disaster intelligence data (`/api/analysis/overview`, `/api/analysis/data`).
+## Features and Implementation Status
 
-**Partially implemented / present in code but not fully wired up** (do not assume these work end-to-end):
+Status key: **Implemented** = reachable end-to-end in code; **Partial** = present but with a significant gap; **Scaffolded** = code exists but nothing in the application reaches it.
 
-- **Email/password authentication** — the `User` model includes a `password_hash` field, and Argon2id/bcrypt hashing utilities exist in `core/security.py`, along with an OTP model and OTP service (Brevo email API integration). However, no route in `app/routes/auth.py` exposes a password-based signup/login or OTP-verification flow — **only Google OAuth login is reachable from the API**.
-- **Standalone fullscreen map page** — `FRONTEND/src/pages/ViewMapPage.jsx` is an explicit placeholder, commented in the source as *"Empty Page Container for Future Implementation."*
-- **Earthquake auto-sync** — disabled by default (`RISEQ_ENABLED=false` in `.env.example`); SACHET sync is enabled by default (`SACHET_ENABLED=true`).
-- **`react-leaflet`** is listed in `package.json` but is not imported anywhere in the codebase; the actual map implementation uses the core `leaflet` package directly.
-
----
+| Feature | Status | How it works | Main code |
+|---|---|---|---|
+| Unified event feed | Implemented | Merges four MongoDB collections into one normalized list with time-range, category, severity, source and location filters | [`events_service.py`](./BACKEND/app/services/events_service.py), [`routes/events.py`](./BACKEND/app/routes/events.py) |
+| Live map | Implemented | Leaflet map with OpenStreetMap tiles, category markers, time-range filter, and an "unmapped events" accounting | [`LiveDisasterMap.jsx`](./FRONTEND/src/pages/LandingPage/components/LiveDisasterMap.jsx) |
+| Earthquake ingestion | Implemented | Scrapes the HTML table of the NCS RISEQ portal, converts times to UTC, classifies India relevance, upserts by deterministic ID | [`sources/riseq.py`](./BACKEND/app/sources/riseq.py), [`earthquake_service.py`](./BACKEND/app/services/earthquake_service.py) |
+| NDMA SACHET alerts | Implemented | Fetches the SACHET RSS feed with ETag / Last-Modified caching, then fetches each CAP XML alert concurrently, extracts polygons and centroids | [`sources/sachet.py`](./BACKEND/app/sources/sachet.py), [`sachet_service.py`](./BACKEND/app/services/sachet_service.py) |
+| AI-assisted news verification | Implemented | Google News RSS → local filters and scoring → clustering → batched Gemini classification → event creation or merge | [`fetch_gnews.py`](./BACKEND/app/services/fetch_gnews.py), [`gemini_controller.py`](./BACKEND/app/services/gemini_controller.py) |
+| Event deduplication | Implemented | Title-token Jaccard similarity and location rules before AI; stable event IDs and active-event matching after AI | [`event_clustering.py`](./BACKEND/app/services/event_clustering.py) |
+| Background scheduling | Implemented | In-process asyncio loops per source, MongoDB distributed locks, checkpoints, run logs, retry with backoff | [`ingestion_scheduler.py`](./BACKEND/app/services/ingestion_scheduler.py) |
+| Gemini quota protection | Implemented | Daily request/token budget, per-minute throttle, reserve margin, 429 circuit breaker, fingerprint cache, deferral queue | [`gemini_quota_manager.py`](./BACKEND/app/services/gemini_quota_manager.py) |
+| Emergency service discovery | Implemented | Overpass API query around an event, Haversine ranking, mirror fallback, 1-hour in-memory cache, auto-expanding radius | [`emergency_service.py`](./BACKEND/app/services/emergency_service.py) |
+| Directions | Implemented | Client-side URL builder (Apple Maps on iOS, Google Maps otherwise) | [`navigation.js`](./FRONTEND/src/utils/navigation.js) |
+| Google OAuth sign-in | Implemented | Authlib flow with direct-HTTP fallback, JWT access token, refresh-token rotation, server-side sessions | [`routes/auth.py`](./BACKEND/app/routes/auth.py), [`auth_service.py`](./BACKEND/app/services/auth_service.py) |
+| Citizen incident reporting | Partial | Authenticated submit/list; shown in the unified feed. No moderation or verification workflow, photos stored as base64 in MongoDB, and a likely defect in feed merging (see [Known Limitations](#known-limitations)) | [`routes/incidents.py`](./BACKEND/app/routes/incidents.py), [`ReportIncidentPage.jsx`](./FRONTEND/src/pages/ReportIncidentPage.jsx) |
+| Analytics dashboard | Implemented | Frontend aggregates `/api/events`, `/api/analysis/overview`, `/api/news/rejected` and `/api/news/stats` into KPIs and charts drawn by a custom chart component | [`AnalysisPage/`](./FRONTEND/src/pages/AnalysisPage), [`analysisDataService.js`](./FRONTEND/src/services/analysisDataService.js) |
+| News list and detail pages | Implemented | Lists verified news events and shows detail with sources and evidence | [`RecentNewsPage.jsx`](./FRONTEND/src/pages/RecentNewsPage.jsx), [`NewsDetailPage.jsx`](./FRONTEND/src/pages/NewsDetailPage.jsx) |
+| Alerts page | Implemented | Map and list view of verified disaster events with filters | [`AlertsPage.jsx`](./FRONTEND/src/pages/AlertsPage.jsx) |
+| Admin ingestion API | Implemented | Status, quota, run history, manual trigger, lock release; guarded by `X-Admin-Key` or an admin user | [`routes/admin_ingestion.py`](./BACKEND/app/routes/admin_ingestion.py) |
+| Email / password login, OTP | Scaffolded | Models, hashing, OTP service and Brevo/SMTP email service exist; no route or service imports the OTP or email code | `core/security.py`, `services/otp_service.py`, `services/email_service.py` |
+| Fullscreen map page | Scaffolded | `ViewMapPage` renders a placeholder ("Empty Page Container for Future Implementation") | [`ViewMapPage.jsx`](./FRONTEND/src/pages/ViewMapPage.jsx) |
+| "Other feeds" ingestion | Scaffolded | The scheduler job only advances a checkpoint; it fetches nothing | `run_other_feeds_ingestion` |
+| Citizen report reconcile job | Scaffolded | The hourly job counts documents and advances a checkpoint; it does not validate or modify reports | `run_citizen_reports_reconcile` |
+| Real-time push (WebSocket / SSE) | Not present | The frontend fetches on load and on filter changes; no polling timer or push channel was found | — |
 
 ## System Architecture
 
-```
-                     ┌───────────────────────────┐
-                     │        FRONTEND           │
-                     │  React 19 + Vite + Tailwind│
-                     │  (Vercel)                 │
-                     └─────────────┬─────────────┘
-                                   │  REST calls (fetch, VITE_API_URL)
-                                   ▼
-                     ┌───────────────────────────┐
-                     │        BACKEND            │
-                     │  FastAPI (app/main.py)    │
-                     │  (Render)                 │
-                     │                            │
-                     │  routes/ → services/ →     │
-                     │  repositories/ → database/ │
-                     └──┬───────┬───────┬────────┘
-                        │       │       │
-        ┌───────────────┘       │       └────────────────┐
-        ▼                       ▼                        ▼
-┌───────────────┐     ┌──────────────────┐      ┌──────────────────┐
-│ MongoDB Atlas │     │ External Data     │      │ External Services│
-│ (motor/pymongo)│    │ Sources:          │      │ - Google OAuth2  │
-│ users, sessions│    │ - NCS RISEQ       │      │ - Gemini API      │
-│ incidents,     │    │   (earthquakes)   │      │ - OSM Overpass API│
-│ news, alerts   │    │ - NDMA SACHET     │      │   (emergency svcs)│
-└───────────────┘     │   (CAP RSS/XML)   │      │ - Nominatim        │
-                       │ - News RSS feeds  │      │   (reverse geocode)│
-                       └──────────────────┘      │ - Brevo (email/OTP)│
-                                                  └──────────────────┘
+### Component diagram
+
+```mermaid
+flowchart LR
+    subgraph Browser["Browser: React 19 SPA (Vite build)"]
+        PAGES["Pages: Landing and Map, Alerts, News, Nearby, Analysis, Report, Auth"]
+        APIJS["services/api.js and analysisDataService.js"]
+        PAGES --> APIJS
+    end
+
+    subgraph Server["FastAPI application: BACKEND/app/main.py"]
+        ROUTES["Routers: auth, events, news, earthquakes, sachet, incidents, emergency, analysis, admin"]
+        SERVICES["Services: events, ingestion, emergency, auth"]
+        SCHED["IngestionScheduler: asyncio loops per source"]
+        PIPES["Pipelines: news and Gemini, RISEQ scraper, SACHET fetcher"]
+        ROUTES --> SERVICES
+        SCHED --> PIPES
+    end
+
+    subgraph Mongo["MongoDB"]
+        COLL[("users, sessions, otps, incident_reports, earthquakes, sachet_alerts, disaster_events, news_temp, rejected_news, ai_usage, pipeline_runs, ingestion_locks, ingestion_checkpoints, sync_state")]
+    end
+
+    subgraph External["External services"]
+        GNEWS["Google News RSS"]
+        GEM["Gemini REST API"]
+        RISEQ["NCS RISEQ portal"]
+        SACHET["NDMA SACHET RSS and CAP XML"]
+        OVP["OpenStreetMap Overpass mirrors"]
+        GOAUTH["Google OAuth 2.0"]
+        NOM["Nominatim reverse geocoding"]
+        OSMT["OpenStreetMap tile servers"]
+    end
+
+    APIJS -->|"REST JSON over HTTPS"| ROUTES
+    APIJS -.->|"reverse geocode from the browser"| NOM
+    PAGES -.->|"map tiles"| OSMT
+    SERVICES <--> COLL
+    PIPES --> COLL
+    PIPES --> GNEWS
+    PIPES --> GEM
+    PIPES --> RISEQ
+    PIPES --> SACHET
+    SERVICES --> OVP
+    ROUTES --> GOAUTH
 ```
 
-**Data flow:**
-1. Background/on-demand pipelines (`services/earthquake_service.py`, `services/sachet_service.py`, `services/fetch_gnews.py`) scrape or fetch from external sources.
-2. News candidates are pre-filtered, geocoded, temporally scored, and sent in batches to the Gemini API for verification/classification (`gemini_controller.py`), then deduplicated (`event_clustering.py`).
-3. Verified records are written to MongoDB collections.
-4. FastAPI routes (`routes/*.py`) read from MongoDB via `repositories/` and serve normalized JSON to the frontend.
-5. The React frontend (`services/api.js`) fetches from these endpoints, normalizes events (`utils/eventNormalizer.js`), and renders them on the Leaflet map, analysis dashboards, and list pages.
-6. Citizen-submitted incident reports flow the opposite direction: frontend form → `POST /api/incidents/report` → `IncidentRepository` → MongoDB, then surfaced back through `GET /api/incidents/recent` and the nearby-emergency-services lookup (which uses the incident's coordinates against the Overpass API).
+### Sequence diagram: news ingestion and verification
 
----
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as IngestionScheduler
+    participant L as MongoDB locks and checkpoints
+    participant N as Google News RSS
+    participant F as Local filters and scorers
+    participant G as Gemini REST API
+    participant D as MongoDB collections
+    participant U as Frontend via /api/events
+
+    S->>L: acquire lock_gnews (lease 3600 s)
+    alt lock already held
+        L-->>S: refused
+        S->>D: skip run (skipped_locked is returned, not logged)
+    else lock acquired
+        S->>N: fetch 31 query feeds (hl=en-IN, gl=IN)
+        N-->>S: articles
+        S->>D: drop IDs already in news_temp, disaster_events or rejected_news
+        S->>F: local_filter (India context, exclusions, evidence)
+        F-->>D: rejected articles go to rejected_news
+        S->>F: score_article (recency, source tier, impact evidence)
+        F-->>D: low scores go to rejected_news
+        S->>F: pre_cluster_candidates (at most 75 per run)
+        loop each batch of GEMINI_BATCH_SIZE
+            S->>L: quota_manager.can_call_ai
+            alt budget or circuit breaker blocks
+                S->>D: mark remaining candidates deferred_quota
+            else call allowed
+                S->>G: classify batch (JSON schema prompt)
+                G-->>S: per-article verdicts
+                alt rejected by AI rules
+                    S->>D: write rejected_news
+                else verified
+                    S->>D: merge into matching active event or create disaster_events
+                end
+            end
+        end
+        S->>L: advance checkpoint, write pipeline_runs, release lock
+    end
+    U->>D: read disaster_events, earthquakes, sachet_alerts, incident_reports
+```
+
+### Architecture explanation
+
+- **Layering (backend).** `routes/` handle HTTP and validation, `services/` hold business logic and pipelines, `sources/` contain the raw scrapers for RISEQ and SACHET, `repositories/` wrap MongoDB access for users, sessions, OTPs and incident reports.
+- **Two MongoDB drivers.** Authentication and incident reporting use the async `motor` driver ([`core/database.py`](./BACKEND/app/core/database.py)). Ingestion, events, news and analysis use the synchronous `pymongo` client ([`database/mongodb.py`](./BACKEND/app/database/mongodb.py)), which is created at import time and requires `MONGO_URI`. Synchronous pipelines are run in the default thread-pool executor by the scheduler.
+- **Scheduler.** On application startup, `IngestionScheduler.start()` creates one asyncio loop per source (GNews 6 h; earthquakes, SACHET, "other feeds" and citizen reconcile 1 h by default). Each loop waits a randomized 5–20 s stagger, runs the job in an executor, then sleeps. Each job takes a MongoDB lease lock so multiple replicas do not overlap, retries with exponential backoff and jitter, advances a per-source checkpoint only on success, and writes a `pipeline_runs` record.
+- **Frontend.** There is no client-side router. `App.jsx` switches pages with a `currentPage` state value, and keeps the landing page mounted so Leaflet state survives navigation. Only `/auth/google/success` is interpreted from the URL. `vercel.json` rewrites all paths to `index.html`.
+- **Frontend fallback.** If `/api/events` fails, `fetchEvents` falls back to calling `/api/earthquakes`, `/api/sachet` and `/api/news/disasters` separately. That fallback does not include citizen reports.
 
 ## Technology Stack
 
-**Backend**
-- Python 3.11, [FastAPI](https://fastapi.tiangolo.com/), Starlette, Uvicorn
-- Pydantic v2 / pydantic-settings for config and schemas
-- MongoDB via `motor` (async) and `pymongo` (sync — used for legacy ingestion pipelines, per in-code comments)
-- Authentication: `PyJWT`, `argon2-cffi`, `bcrypt`, `Authlib` (Google OAuth2), `itsdangerous`, `starlette.SessionMiddleware`
-- Ingestion & parsing: `requests`, `beautifulsoup4`, `lxml`, `feedparser`
-- Geospatial: `geopandas`, `shapely`, `pyproj`, `folium` (declared dependencies; primary in-app geospatial math — Haversine distance, centroid geocoding — is hand-implemented rather than relying on these libraries for the live API paths)
-- AI verification: `google-genai` (Gemini API client)
-- Testing: `pytest`, `pytest-asyncio`, `httpx`
+### Backend (`BACKEND/`)
 
-**Frontend**
-- React 19, Vite 6, TypeScript config (source files are `.jsx`)
-- Tailwind CSS 4
-- Leaflet (core library) for mapping
-- `framer-motion` / `motion` for animation
-- `lucide-react` for icons
-- `@google/genai` (declared as a frontend dependency — leftover from an AI Studio–generated scaffold; the app's actual Gemini usage is backend-side)
+| Area | Technology (from `BACKEND/requirements.txt`) |
+|---|---|
+| Language / runtime | Python 3.11 (`.python-version`; `pyproject.toml` requires `>=3.11`) |
+| Web framework | FastAPI, Starlette, Uvicorn, Pydantic v2, pydantic-settings |
+| Database drivers | `motor` (async), `pymongo[srv]` (sync) |
+| Authentication | PyJWT (HS256), Authlib (Google OAuth), `argon2-cffi` / `bcrypt` (password hashing, unused by any route), `itsdangerous`, Starlette `SessionMiddleware` |
+| Ingestion | `requests`, `beautifulsoup4`, `feedparser`, stdlib `xml.etree` |
+| AI | Gemini `generateContent` REST endpoint, called directly with `requests` |
+| HTTP client (OAuth fallback) | `httpx` |
+| Testing | `pytest`, `pytest-asyncio`, `httpx` |
 
-**Infrastructure**
-- Frontend hosted on **Vercel**
-- Backend hosted on **Render**
-- Database: **MongoDB Atlas**
-- No Docker configuration or CI/CD workflows are present in the repository at this time.
+### Frontend (`FRONTEND/`)
 
----
+| Area | Technology (from `FRONTEND/package.json`) |
+|---|---|
+| Framework / build | React ^19.0.1, Vite ^6.2.3, `@vitejs/plugin-react` |
+| Styling | Tailwind CSS 4 (`@tailwindcss/vite`) |
+| Maps | Leaflet ^1.9.4 (core library, used imperatively) |
+| UI | `lucide-react`, `framer-motion` |
+| Charts | Custom component [`DISHALightweightCharts.jsx`](./FRONTEND/src/components/charts/DISHALightweightCharts.jsx) (no charting library) |
+| Language | JavaScript (`.jsx`); `tsconfig.json` is present with `allowJs` |
 
-## Project Structure
+### Declared but unused dependencies
 
-```
+Static search found no import of these packages in application code:
+
+- Backend: `geopandas`, `shapely`, `pyproj`, `folium`, `google-genai`, `google-auth`, `python-dateutil`, `pytz`. Geospatial work (Haversine distance, centroid lookup, polygon centroid) is hand-written. `lxml`, `email-validator` and `python-multipart` are not imported directly but may be pulled in implicitly by other libraries.
+- Frontend: `react-leaflet`, `@google/genai`, `express`, `dotenv`, `motion`, `tsx`.
+
+## Data Sources and External Integrations
+
+| Source | Used for | Access method | Notes |
+|---|---|---|---|
+| NCS RISEQ (`riseq.seismo.gov.in`) | Earthquakes | HTML scraping with BeautifulSoup | 30-day rolling window; India relevance classes `INDIA`, `INDIA_BORDER`, `REGIONAL`, `OTHER`; SSL verification **off by default** (`RISEQ_VERIFY_SSL`) |
+| NDMA SACHET (`sachet.ndma.gov.in`) | Official CAP alerts | RSS feed + one CAP XML request per alert | ETag / Last-Modified conditional requests; SSL verification **off by default** (`SACHET_VERIFY_SSL`); polygon centroid used for coordinates |
+| Google News RSS | News candidates | `feedparser` over `news.google.com/rss/search` | 31 hard-coded query strings in `NEWS_QUERIES`, India edition |
+| Gemini API | Classification of news candidates | REST `generateContent` | Model from `GEMINI_MODEL`, with an in-code fallback list; temperature 0.1, JSON response mode |
+| OpenStreetMap Overpass | Hospitals, police, fire stations | Overpass QL over four public mirrors | In-memory 1-hour cache; coverage depends on OSM data |
+| Google OAuth 2.0 | Sign-in | Authlib / direct HTTPS | Scopes `openid email profile` |
+| Nominatim | Address text for a captured GPS position | Called **from the browser** in `ReportIncidentPage` | Not called by the backend |
+| OpenStreetMap tiles | Base map | Browser tile requests | Attribution is included in the map code |
+| Brevo / SMTP | Email (OTP) | HTTPS API / SMTP | Code exists but is unreachable from any route |
+| Survey of India boundary | Map boundary overlay | Bundled GeoJSON in `FRONTEND/src/data/indiaBoundaryGeojson.js` | Static data |
+
+## AI and Heuristic Methodology
+
+DISHA contains **no trained or self-hosted machine-learning models**. "AI" means one remote LLM call per batch of news candidates. Everything else is deterministic rule-based code.
+
+### Stage 1 — deterministic pre-processing (no AI)
+
+1. **Normalize and deduplicate** RSS entries by canonical URL and content hash; skip IDs already stored.
+2. **Local filter** ([`fetch_gnews.py`](./BACKEND/app/services/fetch_gnews.py)): reject excluded headlines (sports, metaphors, and so on), require India context via offline place detection, and require disaster keywords or ground-impact / emergency-response evidence from [`evidence_detector.py`](./BACKEND/app/services/evidence_detector.py).
+3. **Quality and recency scoring** ([`quality_scorer.py`](./BACKEND/app/services/quality_scorer.py), [`temporal_extractor.py`](./BACKEND/app/services/temporal_extractor.py), [`source_scorer.py`](./BACKEND/app/services/source_scorer.py)): extract the incident date from text, reject old or anniversary stories and forecast-only items, weight by publisher tier, and compute a priority score. Thresholds are environment-configurable (defaults include a 72-hour maximum age and a minimum candidate score of 5.0).
+4. **Pre-clustering** ([`event_clustering.py`](./BACKEND/app/services/event_clustering.py)): group likely duplicates using disaster-type overlap, extracted locations and Jaccard title similarity (thresholds around 0.35–0.45), without merging different districts. At most 75 candidates (`MAX_GEMINI_CANDIDATES`) go to the AI stage.
+
+### Stage 2 — LLM classification (Gemini)
+
+- A system prompt instructs the model to act as a disaster classifier and return strict JSON with `is_disaster`, `is_current`, `is_historical`, `is_forecast_only`, `is_india`, `confidence`, `disaster_type`, `severity`, location fields, `incident_date`, a one-sentence `reason` and `evidence` bullets.
+- Articles are sent in batches (`GEMINI_BATCH_SIZE`, default 10). Responses are validated and missing IDs are retried selectively.
+- **Acceptance rule in code:** an article is rejected if it is not a disaster, not in India, historical, forecast-only, not current, or below `GEMINI_CONFIDENCE_THRESHOLD` (default 0.70). Accepted articles get tier `high` at or above `GEMINI_AUTO_VERIFY_THRESHOLD` (default 0.90) and `medium` otherwise.
+- **Model fallback:** retries move through a list of model names defined in `gemini_controller.py`. Whether those model names exist for your API key is not verified by the repository.
+- **Quota safety:** budgets, RPM limit, reserve margin, circuit breaker (15-minute cooldown after HTTP 429), fingerprint cache, and `deferred_quota` / `pending_ai` / `failed` article states so candidates survive quota exhaustion.
+
+### Stage 3 — event creation and merge
+
+Verified articles are matched to an existing active event by type, location and date (`find_matching_active_event`). A match adds the article as corroboration (source count, evidence, max confidence); otherwise a new `disaster_events` document is created with a stable event ID and an offline geocode.
+
+### Geocoding
+
+Geocoding is an offline registry lookup ([`geocoding.py`](./BACKEND/app/services/geocoding.py), [`geo_filter_service.py`](./BACKEND/app/services/geo_filter_service.py)): district or city centroid, then state centroid, otherwise `unresolved` with no coordinates. These are **centroids, not precise incident locations**. The code deliberately refuses to assign a default India centroid to unresolved events.
+
+### What is not AI
+
+Earthquake and SACHET ingestion contain no AI. Citizen reports are not classified or verified by any model.
+
+## Complete Data Flow
+
+1. **Trigger.** The scheduler loops (or an admin call to `POST /api/admin/ingestion/trigger`, or the unauthenticated `POST /api/{news,earthquakes,sachet}/fetch|sync` routes) start a pipeline.
+2. **Lock and checkpoint.** The job acquires a MongoDB lease lock and reads its checkpoint.
+3. **Fetch.** News is pulled from Google News RSS, earthquakes from the RISEQ HTML table, alerts from the SACHET RSS plus CAP XML.
+4. **Normalize and store.** Earthquakes are upserted into `earthquakes`, alerts into `sachet_alerts`. News passes the filters and the AI stage described above and lands in `disaster_events`; intermediates are kept in `news_temp` and rejections in `rejected_news`.
+5. **Record.** On success the checkpoint advances and a `pipeline_runs` document is written. Gemini usage is tracked in `ai_usage`.
+6. **Serve.** `GET /api/events` reads `earthquakes`, `sachet_alerts`, `disaster_events` and `incident_reports`, normalizes time, category, severity and coordinates, deduplicates by ID, and returns events with mapped and unmapped counts.
+7. **Visualize.** The frontend normalizes events (`eventNormalizer.js`), draws markers on a Leaflet map, and feeds the analysis pages. Clicking an event can request `/api/emergency-services` for nearby facilities.
+8. **Citizen loop.** A signed-in user submits `POST /api/incidents/report`; the report is stored in `incident_reports` and appears in `/api/events` on the next read.
+
+## Project Directory Structure
+
+```text
 DISHA-platform/
 ├── BACKEND/
-│   ├── main.py                    # Entrypoint wrapper → app.main:app
-│   ├── requirements.txt
+│   ├── main.py                     # Uvicorn entry wrapper for app.main:app
+│   ├── requirements.txt            # Authoritative backend dependency list
+│   ├── pyproject.toml              # Minimal; declares Python >=3.11, no dependencies
+│   ├── .env.example
 │   ├── app/
-│   │   ├── main.py                # FastAPI app factory, middleware, router registration
-│   │   ├── core/                  # config.py, database.py, security.py
-│   │   ├── database/mongodb.py    # Sync MongoDB client/index setup
-│   │   ├── dependencies/          # auth.py (JWT guard), rate_limiter.py
-│   │   ├── models/                # Pydantic DB models (user, incident_report, otp, session)
-│   │   ├── repositories/          # MongoDB data-access layer
-│   │   ├── routes/                # auth, incidents, events, earthquakes, sachet, gnews,
-│   │   │                          #   emergency_services, analysis
-│   │   ├── schemas/                # Request/response schemas
-│   │   ├── services/               # Business logic + ingestion pipelines (see below)
-│   │   ├── sources/                # riseq.py, sachet.py — raw external scrapers
+│   │   ├── main.py                 # App factory, middleware, routers, lifespan (indexes, scheduler)
+│   │   ├── core/                   # config.py, database.py (async), security.py
+│   │   ├── database/mongodb.py     # Sync PyMongo client and index creation
+│   │   ├── dependencies/           # auth.py (JWT guard), rate_limiter.py
+│   │   ├── models/ schemas/        # Pydantic models and schemas
+│   │   ├── repositories/           # users, sessions, otps, incident reports
+│   │   ├── routes/                 # auth, events, gnews (news), earthquakes, sachet,
+│   │   │                           # incidents, emergency_services, analysis, admin_ingestion
+│   │   ├── services/               # ingestion, scoring, clustering, Gemini, geocoding, events
+│   │   ├── sources/                # riseq.py, sachet.py (raw scrapers)
 │   │   └── utils/
-│   ├── tests/                      # pytest suites for auth, incidents, news, pipelines
-│   ├── data/                       # Sample/working CSV outputs from the news pipeline
-│   └── *.xml                       # Sample CAP/SACHET payloads used in testing
+│   ├── tests/                      # 13 pytest modules (114 test functions)
+│   ├── data/                       # CSV exports of news_temp and rejected_news (sample data)
+│   ├── plan/                       # Design notes (ingestion_plan.md, plan.md, pla.md)
+│   └── *.xml, *.py helpers         # Sample CAP payloads; Windows-specific screenshot scripts
 ├── FRONTEND/
 │   ├── src/
-│   │   ├── pages/                  # LandingPage, AuthPage, AlertsPage, AnalysisPage,
-│   │   │                          #   ReportIncidentPage, NearbyIncidentsPage, NewsDetailPage,
-│   │   │                          #   RecentNewsPage, ViewMapPage (placeholder)
-│   │   ├── components/             # charts/, common/ (ErrorBoundary, NotificationToast, CitySelector)
-│   │   ├── context/AuthContext.jsx
-│   │   ├── services/api.js         # Central API client
-│   │   ├── config/eventConfig.js
-│   │   ├── utils/                  # dateTime, eventNormalizer, htmlSanitizer
-│   │   └── assets/                 # logo, hero image, static India map image
-│   ├── vite.config.js              # Dev proxy: /api → http://127.0.0.1:8000
-│   └── vercel.json
-├── requirements.txt                 # Duplicate of BACKEND/requirements.txt
-├── vercel.json
-└── LICENSE
+│   │   ├── App.jsx                 # State-based page switching (no router)
+│   │   ├── pages/                  # LandingPage, AlertsPage, AnalysisPage, RecentNewsPage,
+│   │   │                           # NewsDetailPage, NearbyIncidentsPage, ReportIncidentPage,
+│   │   │                           # AuthPage, ViewMapPage (placeholder)
+│   │   ├── components/             # charts/, common/
+│   │   ├── context/                # AuthContext, TimeRangeContext
+│   │   ├── services/               # api.js, analysisDataService.js
+│   │   ├── config/eventConfig.js   # Categories, colors, static safety tips
+│   │   ├── utils/                  # dateTime, eventNormalizer, htmlSanitizer, navigation
+│   │   └── data/                   # Boundary GeoJSON, analysis registry, unused sample data
+│   ├── vite.config.js              # Dev proxy /api -> http://127.0.0.1:8000
+│   └── vercel.json                 # SPA rewrite to index.html
+├── scripts/verify_multi_area.py    # Manual geo-filter verification script (needs MongoDB)
+├── requirements.txt                # Out of date: lacks Authlib and itsdangerous
+├── vercel.json                     # SPA rewrite (same as FRONTEND/vercel.json)
+├── LICENSE
+└── README.md
 ```
 
----
-
-## How It Works
-
-1. **Ingestion:** Scheduled/triggerable pipelines pull data from NCS RISEQ, NDMA SACHET, and news RSS feeds.
-2. **Verification:** News items pass through geocoding, source-quality scoring, temporal-recency scoring, and Gemini-based AI classification before being marked verified.
-3. **Storage:** Verified events, incident reports, users, sessions, and OTP records are persisted in MongoDB Atlas.
-4. **API layer:** FastAPI exposes normalized, filterable endpoints for events, earthquakes, SACHET alerts, news, incidents, and emergency services.
-5. **Presentation:** The React frontend fetches from these endpoints and renders a live Leaflet map, a KPI/analytics dashboard, and list/detail views, with client-side normalization to reconcile the differing shapes of earthquake / SACHET / news documents.
-6. **Citizen input loop:** Authenticated users can add their own incident reports, which become part of the same pipeline of location-tagged, categorized events.
-
----
-
-## Installation
+## Installation and Local Development
 
 ### Prerequisites
-- **Node.js** (for the frontend — Vite 6 / React 19 require a recent LTS version)
-- **Python 3.11** (pinned via `BACKEND/.python-version`)
-- A **MongoDB** instance (MongoDB Atlas connection string, or a local MongoDB server)
-- API credentials for the services you want to enable (Google OAuth2, Gemini API, Brevo — see below)
 
-### Clone and install dependencies
+- Python 3.11
+- Node.js (a version supported by Vite 6, for example 18 or newer; the repository does not pin one)
+- A reachable MongoDB instance (Atlas or local). **The backend cannot start without `MONGO_URI`.**
+- Optional, per feature: Google OAuth client credentials, a Gemini API key.
+
+> The [LICENSE](./LICENSE) restricts copying, cloning and reuse without written permission. Obtain permission before using the commands below outside the project team.
+
+### Backend
 
 ```bash
 git clone https://github.com/Chitransh-22/DISHA-platform.git
-cd DISHA-platform
-```
+cd DISHA-platform/BACKEND
 
-> **Note:** the repository's [LICENSE](#license) restricts copying, cloning, and reuse of the source code without written permission from the DISHA-PLATFORM Team — see the [License](#license) section before using this command outside of authorized access.
-
-**Backend:**
-```bash
-cd BACKEND
 python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env           # then fill in your credentials
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+
+pip install -r requirements.txt      # use BACKEND/requirements.txt, not the root file
+cp .env.example .env                 # then edit; never commit .env
 ```
 
-**Frontend:**
-```bash
-cd FRONTEND
-npm install
-cp .env.example .env           # then set VITE_API_URL if needed
-```
+Minimum `.env` for the API to start: `MONGO_URI`, `MONGO_DB`. Set a strong `JWT_SECRET` (the code has a built-in default, which must not be used outside local testing). For sign-in set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URI`.
 
----
+**Recommended for local development:** set `INGESTION_SCHEDULER_ENABLED=false`. Otherwise the scheduler starts with the app and begins contacting external services and, if `GEMINI_API_KEY` is set, consuming Gemini quota. Note that `.env.example` only disables earthquake ingestion (`RISEQ_ENABLED=false`); the code default for `EARTHQUAKE_ENABLED` is `true`.
 
-## Environment Variables
-
-Values below are taken directly from `BACKEND/.env.example` and `FRONTEND/.env.example`.
-
-### Backend (`BACKEND/.env`)
-
-| Variable | Purpose |
-|---|---|
-| `ENV`, `HOST`, `PORT`, `DEBUG` | Server runtime configuration |
-| `FRONTEND_URL`, `BACKEND_URL`, `ALLOWED_ORIGINS` | CORS / deployment URL wiring |
-| `MONGO_URI`, `MONGO_DB` | MongoDB Atlas connection string and database name |
-| `JWT_SECRET`, `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` | JWT auth configuration |
-| `OTP_EXPIRE_MINUTES`, `OTP_MAX_ATTEMPTS` | OTP settings (scaffolded — not currently exposed via a route) |
-| `COOKIE_NAME`, `COOKIE_SECURE`, `COOKIE_SAMESITE`, `COOKIE_PATH` | Refresh-token cookie configuration |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Google OAuth2 sign-in |
-| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | Transactional email/OTP delivery (falls back to console-logging OTPs in local dev if unset) |
-| `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_BATCH_SIZE`, `NEWS_RESULTS_PER_QUERY`, `GEMINI_CONFIDENCE_THRESHOLD`, `GEMINI_AUTO_VERIFY_THRESHOLD` | AI news-verification pipeline |
-| `RISEQ_ENABLED`, `SACHET_ENABLED` | Toggle earthquake / SACHET ingestion pipelines |
-
-### Frontend (`FRONTEND/.env`)
-
-| Variable | Purpose |
-|---|---|
-| `VITE_API_URL` | Base URL of the backend API. Leave empty locally to use the Vite dev proxy (`/api` → `http://127.0.0.1:8000`); set to the deployed backend URL in production. |
-
----
-
-## Running Locally
-
-**Backend** (from `BACKEND/`):
 ```bash
 python main.py
 # or
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
-The API will be available at `http://127.0.0.1:8000`, with interactive docs at `/docs` (Swagger) and `/redoc`.
 
-**Frontend** (from `FRONTEND/`):
+Interactive docs: `http://127.0.0.1:8000/docs` and `/redoc`.
+
+To run ingestion manually without the API server:
+
 ```bash
-npm run dev
+python -m app.services.ingestion_scheduler --status
+python -m app.services.ingestion_scheduler --source sachet
+python -m app.services.ingestion_scheduler --source all --force   # --force bypasses SACHET ETag checks
 ```
-The Vite dev server proxies `/api` requests to `http://127.0.0.1:8000` automatically (see `vite.config.js`), so no `VITE_API_URL` is required for local development against a local backend.
 
----
+### Frontend
 
-## API Documentation
+```bash
+cd FRONTEND
+npm install
+cp .env.example .env
+```
 
-All routes are prefixed as shown; base path is the backend's root URL. Auto-generated interactive documentation is available at **`/docs`** and **`/redoc`** once the backend is running.
+`FRONTEND/.env.example` sets `VITE_API_URL` to the production backend URL. For local development against a local backend, **leave `VITE_API_URL` empty** so the Vite dev proxy (`/api` → `http://127.0.0.1:8000`) is used.
 
-**General**
-- `GET /` — root health/info
-- `GET /health`, `GET /api/health` — health check
+```bash
+npm run dev       # development server (default http://localhost:5173)
+npm run build     # production build to dist/
+npm run preview   # serve the production build
+```
 
-**Auth** — prefix `/api/auth`
-- `GET /google/login`, `GET /google/callback` — Google OAuth2 flow
-- `POST /refresh-token` — rotate access token using refresh token
-- `GET /get-me` — current authenticated user
-- `POST /logout`, `POST /logout-all`
-- `GET /status` — auth status
+`npm run lint` runs `tsc --noEmit` and does not run ESLint, although an `eslint.config.js` file exists. `FRONTEND/README.md` is a leftover AI Studio template and does not describe this application (its `GEMINI_API_KEY` instruction does not apply).
 
-**Incidents** — prefix `/api/incidents` (alias `/api/reports`)
-- `POST /report` — submit an incident report (auth required)
-- `GET /my-reports` — current user's reports (auth required)
-- `GET /recent` — recent incident reports
-- `GET /{report_id}` — single report by ID
+## Configuration Reference
 
-**Events** — prefix `/api/events`
-- `GET /` — unified list of earthquakes + SACHET alerts + verified news
-- `GET /{event_id}` — event detail
+Names and defaults below come from [`BACKEND/app/core/config.py`](./BACKEND/app/core/config.py), the ingestion modules and the `.env.example` files. Values are not reproduced here.
 
-**Earthquakes** — prefix `/api/earthquakes`
-- `GET /` — filtered list
-- `GET /latest`, `GET /stats`
-- `POST /fetch`, `POST /sync` — trigger NCS RISEQ ingestion
-- `GET /{event_id}` — single earthquake
+| Variable | Purpose | Default in code |
+|---|---|---|
+| `MONGO_URI`, `MONGO_DB` | MongoDB connection and database name | `MONGO_URI` required by the sync client; DB name `DISHA` |
+| `ENV` / `ENVIRONMENT`, `HOST`, `PORT`, `DEBUG` | Runtime mode (auto-`production` on Render/Vercel env markers) | `development`, `127.0.0.1`, `8000` |
+| `FRONTEND_URL`, `BACKEND_URL`, `ALLOWED_ORIGINS`, `CORS_ORIGINS` | CORS and OAuth redirect resolution | local dev URLs plus the Vercel production origin |
+| `JWT_SECRET`, `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` | Token signing and lifetimes | built-in insecure default secret, `HS256`, 15 min, 7 days |
+| `COOKIE_NAME`, `COOKIE_SECURE`, `COOKIE_SAMESITE`, `COOKIE_DOMAIN`, `COOKIE_PATH` | Refresh-token cookie | `refresh_token`, `false`, `lax`, none, `/` |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Google sign-in | unset |
+| `ADMIN_API_KEY` | Enables `X-Admin-Key` access to `/api/admin/ingestion/*` | unset |
+| `INGESTION_SCHEDULER_ENABLED` | Master switch for background loops | `true` |
+| `GNEWS_ENABLED`, `EARTHQUAKE_ENABLED` (alias `RISEQ_ENABLED`), `SACHET_ENABLED`, `OTHER_FEEDS_ENABLED` | Per-source switches | all `true` |
+| `GNEWS_INTERVAL_HOURS`, `EARTHQUAKE_INTERVAL_HOURS`, `SACHET_INTERVAL_HOURS`, `OTHER_FEEDS_INTERVAL_HOURS` | Loop intervals | 6, 1, 1, 1 |
+| `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_BATCH_SIZE` | AI verification | key unset; batch size 10 |
+| `GEMINI_CONFIDENCE_THRESHOLD`, `GEMINI_AUTO_VERIFY_THRESHOLD` | Acceptance and tiering | 0.70, 0.90 |
+| `GEMINI_DAILY_REQUEST_BUDGET`, `GEMINI_REQUESTS_PER_MINUTE`, `GEMINI_DAILY_TOKEN_BUDGET`, `GEMINI_QUOTA_RESERVE_PERCENT` | Quota manager | 250, 10, 500000, 20 |
+| `GEMINI_RPM_LIMIT`, `DAILY_REQUEST_LIMIT` | Read directly by `gemini_controller.py` | 12, 450 (differs from the quota manager defaults above) |
+| `NEWS_RESULTS_PER_QUERY`, `NEWS_MAX_AGE_HOURS`, `MIN_LOCAL_CANDIDATE_SCORE`, `MAX_GEMINI_CANDIDATES` | News pipeline tuning | 25, 72, 5.0, 75 |
+| `RISEQ_URL`, `RISEQ_VERIFY_SSL`, `SACHET_RSS_URL`, `SACHET_VERIFY_SSL` | Government source endpoints and TLS verification | official URLs; verification off |
+| `BREVO_*`, `SMTP_*`, `OTP_*` | Email / OTP settings | unused by any reachable code path |
+| `VITE_API_URL` (frontend) | Backend base URL | empty locally; falls back to the Render URL on non-localhost hosts |
 
-**SACHET Alerts** — prefix `/api/sachet`
-- `POST /fetch`, `POST /sync` — trigger NDMA SACHET ingestion
-- `GET /`, `GET /latest`, `GET /stats`
-- `GET /{event_id}` — single alert
+## API Reference
 
-**News** — prefix `/api/news`
-- `GET /sources`, `GET /recent`, `GET /disasters`, `GET /rejected`, `GET /stats`
-- `POST /fetch` — trigger news ingestion pipeline
-- `GET /detail/{news_id}`, `GET /{news_id}` — article detail
+All routes were checked against the router definitions. Interactive documentation is generated by FastAPI at `/docs`. Responses are JSON unless a redirect is noted. "Auth" means a `Bearer` access token.
 
-**Emergency Services**
-- `GET /api/emergency-services`, `GET /api/emergency-services/nearby`
-- `GET /api/nearby-services`, `GET /api/nearby-services/nearby` (aliases)
+### General
 
-**Analysis** — prefix `/api/analysis`
-- `GET /overview` — KPI summary
-- `GET /data` — multi-criteria filtered analytics data
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | — | Service info |
+| GET, HEAD | `/health`, `/api/health` | — | Health check |
 
----
+### Authentication — `/api/auth`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/google/login` | — | Redirect to Google consent screen |
+| GET | `/google/callback` | — | Completes OAuth, creates or updates the user, redirects to the frontend with tokens in the URL query |
+| POST | `/refresh-token` | refresh cookie | Rotates tokens |
+| GET | `/get-me` | Bearer | Current user |
+| POST | `/logout` | refresh cookie | Ends the current session |
+| POST | `/logout-all` | Bearer | Ends all sessions |
+| GET | `/status` | — | Auth service status |
+
+### Events and analysis
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/events` | — | Unified feed. Filters: `time_range` (aliases `range`, `time_window`, `days`), `start_date`, `end_date`, `category`, `severity`, `status`, `source`, `state`, `district`, `city`, `limit`, `skip`, unmapped inclusion |
+| GET | `/api/events/{event_id}` | — | One event (implemented by loading all events, then searching) |
+| GET | `/api/analysis/overview` | — | KPI summary used by the analysis page |
+| GET | `/api/analysis/data` | — | Filtered analytics data (not called by the current frontend) |
+
+### News — `/api/news`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/sources` | — | Distinct sources |
+| GET | `/recent` | — | Recent verified news |
+| GET | `/disasters` | — | Verified disaster events |
+| GET | `/rejected` | — | Rejected articles with reasons |
+| GET | `/stats` | — | Pipeline statistics |
+| POST | `/fetch` | **none** | Starts the news and AI pipeline in the background |
+| GET | `/detail/{news_id}`, `/{news_id}` | — | Article detail |
+
+### Earthquakes — `/api/earthquakes`, SACHET — `/api/sachet`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `` (list), `/latest`, `/stats`, `/{event_id}` | — | Query stored records (both prefixes) |
+| POST | `/fetch`, `/sync` | **none** | Triggers the respective pipeline (`background` query flag; SACHET also `force_refresh`) |
+
+### Incidents — `/api/incidents` (alias `/api/reports`)
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/report` (aliases: `/api/reports` and `/api/reports/report`) | Bearer | Submit a report (`event_type`, `description`, `location`, `images`) |
+| GET | `/my-reports` | Bearer | The caller's reports |
+| GET | `/recent` | — | Recent reports (`user_email` blanked) |
+| GET | `/{report_id}` | — | One report by ID; the stored document is returned without sanitization |
+
+### Emergency services
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/emergency-services`, `/api/emergency-services/nearby`, `/api/nearby-services`, `/api/nearby-services/nearby` | — | Nearby hospitals, police, fire stations. Parameters: `lat`/`latitude`, `lng`/`lon`/`longitude`, `radius` (m, default 5000) or `radius_km`, `limit`, `auto_expand` (default true; expands to 15 and 25 km when nothing is found) |
+
+### Admin ingestion — `/api/admin/ingestion`
+
+Access requires a matching `X-Admin-Key` header (when `ADMIN_API_KEY` is set) or an authenticated user with an admin role.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/status` | Scheduler, locks, checkpoints, Gemini telemetry |
+| GET | `/quota` | Gemini quota and circuit breaker state |
+| GET | `/runs` | `pipeline_runs` history (`source`, `status`, `limit`) |
+| POST | `/trigger` | Run a source or all (`source`, `background`, `force`) |
+| POST | `/locks/release` | Force-release a named lock |
+
+## Database Architecture
+
+MongoDB, database `MONGO_DB` (default `DISHA`). There is no ORM; documents are accessed through repositories (async) or directly (sync). Indexes are created at startup.
+
+| Collection | Written by | Purpose | Notable indexes |
+|---|---|---|---|
+| `users`, `sessions`, `otps` | auth code | Accounts, refresh-token sessions (stored as hashes), OTP records (OTP flow unreachable) | email / username / token hash |
+| `incident_reports` | incident routes | Citizen reports; status field defaults to `submitted` | unique `report_id`; sparse `2dsphere` on `location.coordinates` |
+| `earthquakes` | RISEQ pipeline | Normalized earthquakes | unique `event_id`; `origin_timestamp`, magnitude, relevance |
+| `sachet_alerts` | SACHET pipeline | Normalized CAP alerts | unique `event_id`; time, severity, state, `is_active` |
+| `disaster_events` | news pipeline | AI-verified news events with corroboration | `event_id`, status/type, state/district/city, dates |
+| `news_temp` | news pipeline | Candidate articles and queue state (`pending_ai`, `deferred_quota`, `processed`, `failed`, …) | status/retry, priority |
+| `rejected_news` | news pipeline | Rejected articles with stage and reason | `article_id`, stage/reason |
+| `ai_usage` | Gemini controllers | Daily request and token accounting, classification cache | — |
+| `pipeline_runs` | scheduler, services | Run telemetry | — |
+| `ingestion_locks`, `ingestion_checkpoints` | scheduler | Distributed leases, per-source watermarks | lock indexes |
+| `sync_state` | SACHET pipeline | ETag / Last-Modified cache | unique `pipeline` |
+
+The synchronous client is configured with `readPreference="secondaryPreferred"`.
 
 ## Deployment
 
-Based on configuration present in the repository and the deployed URLs referenced in code:
+What the repository configures:
 
-- **Frontend:** Deployed on **Vercel** (`disha-platform.vercel.app`), using `FRONTEND/vercel.json`'s SPA rewrite rule to route all paths to `index.html`.
-- **Backend:** Deployed on **Render**, referenced as `disha-platform.onrender.com` in `.env.example` and as the production fallback API URL in `FRONTEND/src/services/api.js`.
-- **Database:** MongoDB Atlas (connection via `MONGO_URI`).
-- No Dockerfiles, container orchestration, or CI/CD pipeline definitions were found in the repository — deployment appears to be configured directly through the Vercel and Render platforms rather than via in-repo automation.
+- **Frontend:** a Vite build with an SPA rewrite in `vercel.json` (present both at the repo root and in `FRONTEND/`). The production API URL is supplied via `VITE_API_URL` or the in-code fallback.
+- **Backend:** no `Dockerfile`, `Procfile`, `render.yaml` or CI workflow is present. The code recognizes Render environment variables (`RENDER`, `RENDER_SERVICE_ID`, `RENDER_EXTERNAL_URL`) to switch to production behavior, and references `disha-platform.onrender.com`. Build and start commands for Render are therefore configured outside the repository.
+- **Database:** MongoDB (Atlas is referenced in configuration comments).
+- **Scheduling:** in-process by default. Because jobs use MongoDB locks, several replicas can run the scheduler safely; the CLI (`python -m app.services.ingestion_scheduler`) can be used from an external cron or worker instead.
+- Which directory Vercel uses as its project root is not defined in the repository.
 
----
+## Screenshots and Demo
 
-## Screenshots / Demo
+The repository contains no screenshots or demo recordings. Image assets under `FRONTEND/src/assets/` are logos, a hero image and a static India map photo used by the UI. A live deployment is referenced at `https://disha-platform.vercel.app` (not verified by this audit). `BACKEND/take_screenshots.py` and `BACKEND/capture_dist.py` are developer scripts with hard-coded Windows paths and are not portable.
 
-The repository does not currently include a dedicated screenshots folder. Visual assets present in the codebase are UI assets rather than demo captures: `FRONTEND/src/assets/hero.png`, `disha_logo.png` / `disha_logo.jpeg`, and a static reference map image (`india_dmaps_political_map_*.jpg`) used within the UI.
+## Testing
 
-For a live demonstration of the actual application, see the deployed frontend: **[disha-platform.vercel.app](https://disha-platform.vercel.app)**.
+- **Location:** [`BACKEND/tests/`](./BACKEND/tests) — 13 modules, 114 `test_*` functions.
+- **Coverage areas:** authentication and OAuth flow, incidents, unified events and data consistency (`T = M + U`), news filtering, scoring and clustering, SACHET and RISEQ parsing, emergency services, scheduler locks / checkpoints / quota behavior, plus a few frontend-related checks (direction URLs, boundary GeoJSON) written as Python tests.
+- **Run:** `cd BACKEND && pytest`. Importing the application requires `MONGO_URI`, and several modules touch MongoDB or external endpoints, so expect to need a configured database. Pass/fail status and coverage were not measured.
+- **Frontend tests:** none. There is no test runner configured in `package.json`.
+- **CI:** none configured.
+- **Side effect to know about:** `fetch_gnews()` imports `tests/generate_temp_map_ui.py` and regenerates an HTML map file after each run (errors are swallowed). Production code therefore depends on the test directory.
 
----
+## Known Limitations
 
-## Team
+### Functional
 
-Repository owner: **[Chitransh-22](https://github.com/Chitransh-22)**. The LICENSE refers to a "DISHA-PLATFORM Team" as rights holder; no additional contributor list or team roster is published in the repository at this time.
+- **Citizen reports are unverified but labeled "Verified Citizen Report"** in the unified feed. The `status` field starts as `submitted`, and no route changes it.
+- **Likely defect in feed merging.** In `get_unified_events`, the citizen-report loop references the variable `ev` (`ev.get("article_id")`), which is only defined by the earlier news loop. By static reading, if no news events fall in the selected range (or `source` excludes news), the lookup raises inside a `try` block and all citizen reports are dropped for that request, with only a logged error. When news events exist, citizen reports receive the last news event's `article_id`. This was found by reading, not by running the code.
+- **Coordinates are approximate** for news and alerts that lack explicit points (district or state centroids, polygon centroids).
+- **Photos** are embedded as base64 data URLs inside MongoDB documents (up to 5 images in the UI, no server-side size validation). The unified feed returns the first image inline, which makes event payloads large.
+- **Validation mismatch:** the UI requires 10–100 words; the API accepts 5–2000 characters.
+- **No automated lifecycle** for news events: events are created with status `active`; no job was found that resolves or expires them.
+- **Fixed query set:** the news pipeline uses 31 hard-coded English queries.
+- **Admin-only trigger gap:** manual triggers exist on both the admin API and public routes (see Security).
+- **Overlapping quota layers:** `gemini_controller.QuotaController` and `GeminiQuotaManager` enforce separate limits with different default values.
+- **Quality of AI output** depends on the Gemini model; classifications are best-effort and unaudited. No accuracy metrics exist in the repository.
 
----
+### Security and privacy (documented, not changed by this README)
+
+- `POST /api/news/fetch`, `/api/earthquakes/fetch|sync` and `/api/sachet/fetch|sync` are unauthenticated. The news route can trigger Gemini usage.
+- The OAuth callback redirects with both the access token and the refresh token in the URL query string, and the frontend stores them in `localStorage` as well as using an HttpOnly refresh cookie.
+- The post-login redirect accepts any origin ending in `.vercel.app`, any `localhost`, and any value containing `127.0.0.1` as the frontend target.
+- The saved OAuth `state` value is not compared in the callback, and the direct-HTTP fallback path performs no state check. The ID-token fallback parses claims without signature verification.
+- `config.py` contains a built-in default `JWT_SECRET`. A deployment that forgets to set it uses a publicly known key.
+- Admin access also grants rights to two hard-coded email addresses in `admin_ingestion.py`.
+- `GET /api/incidents/{report_id}` is public and returns the stored report without blanking `user_email`. The unified feed exposes the reporter's display name in event metadata.
+- TLS certificate verification is disabled by default for the RISEQ and SACHET requests.
+- The Gemini API key is sent as a URL query parameter, which can appear in logs.
+- Rate-limiter settings exist (`RATE_LIMIT_*`), but only auth-related limits are defined; the public ingestion and report routes are not rate limited.
+
+### Engineering hygiene
+
+- Root `requirements.txt` is out of date (no Authlib, no itsdangerous); use `BACKEND/requirements.txt`.
+- Duplicate Vite configs (`vite.config.js`, `vite.config.ts`), a placeholder `BACKEND/README.md` (empty), an AI Studio template `FRONTEND/README.md`, unused frontend files (`data/disasterData.js`, `RealisticIndiaMap.jsx`), an orphaned `earthquake_scheduler.py`, and comments in `api.js` and `routes/sachet.py` that contain stale counts or claims ("no background schedulers").
+- Several modules call `load_dotenv` and mutate `sys.path` individually, and settings are read both through `settings` and directly with `os.getenv`.
+
+## Future Scope
+
+These items are implied by the repository's own placeholders and gaps. They are not a committed roadmap.
+
+- Implement the fullscreen map page.
+- Decide on email/password and OTP sign-in: either wire up the existing OTP and email services or remove the scaffolding.
+- Add a moderation and verification workflow for citizen reports, and move photos to object storage.
+- Protect or remove the public manual-trigger routes and tighten the OAuth flow described above.
+- Implement real "other feeds" ingestion, or remove the placeholder job.
+- Add event lifecycle handling (resolve or expire), CI, frontend tests and a Dockerfile.
+- Remove unused dependencies and refresh the root `requirements.txt`.
+
+## Team and Contributors
+
+The `LICENSE` names the "DISHA-PLATFORM Team" as rights holder.
+
+### Ownership
+
+GitHub accounts:
+
+- [Chitransh-22](https://github.com/Chitransh-22)
+- [SpMandali108](https://github.com/SpMandali108)
+- [SmitHThakar](https://github.com/SmitHThakar)
+
+### Honorable Mentions
+
+- **Research:** Dev Chavda
+- **Presentation:** Dhruvi Kagathara
 
 ## License
 
-This repository is distributed under a **custom Source-Available License** (see [`LICENSE`](./LICENSE) in the repository root), copyright the DISHA-PLATFORM Team. It is **not** an OSI-approved open-source license. In summary (the `LICENSE` file is the authoritative source — refer to it directly for full terms):
+DISHA is distributed under a custom **source-available** license (see [`LICENSE`](./LICENSE)), not an OSI-approved open-source license. In summary, public visibility of the repository does not grant permission to copy, download, clone, fork, modify, redistribute or reuse the code; this requires prior written permission from the DISHA-PLATFORM Team. The `LICENSE` file is authoritative. Third-party libraries and services keep their own licenses and terms.
 
-- The repository is publicly visible for **viewing, academic evaluation, portfolio presentation, and research discussion**.
-- Public visibility does **not** grant rights to copy, download, redistribute, modify, fork, clone, mirror, sublicense, or commercially use the source code.
-- Any reuse, modification, or redistribution requires **prior written permission** from the DISHA-PLATFORM Team.
-- Third-party libraries and services used by the project remain governed by their own respective licenses.
-- The software is provided **"AS IS"**, without warranty of any kind.
+## Disclaimer
 
-Please read the full [`LICENSE`](./LICENSE) file before using, referencing, or building upon any part of this codebase.
-
----
-
-## Disclaimer / Limitations
-
-- This is a hackathon/academic-style project and **should not be relied upon as an official or authoritative source of disaster or emergency information**. Always consult official government channels (NDMA, NCS, local authorities) for emergency decision-making.
-- **Email/password authentication is not functional** — only Google OAuth2 login is exposed via the API, despite password-hashing and OTP scaffolding existing in the codebase.
-- The **standalone fullscreen map page (`ViewMapPage`) is an unimplemented placeholder**.
-- **Earthquake ingestion is disabled by default** (`RISEQ_ENABLED=false`); only SACHET ingestion runs by default.
-- The AI news-verification pipeline depends on a third-party LLM (Gemini) and is subject to that provider's accuracy, availability, and rate/quota limits; verification labels should be treated as automated best-effort classification, not guaranteed fact-checking.
-- Emergency-services lookup depends on OpenStreetMap/Overpass data completeness, which varies by region and may be incomplete for some areas of India.
-- No automated test pipeline (CI) is currently configured, even though a `pytest` test suite exists under `BACKEND/tests/`.
-- Geocoding for SACHET/news events without explicit coordinates falls back to state/district **centroid approximation**, not precise location data.
-
----
-
-## DISHA Android Native Application
-
-The DISHA platform is packaged as a native Android application using **Capacitor 8**, providing an installable, high-performance mobile client while preserving 100% of the existing React/Vite web application.
-
-### 1. Android Application Architecture
-
-```
-┌────────────────────────────────────────────────────────┐
-│                   DISHA Android App                    │
-│                 Package: in.disha.app                  │
-├────────────────────────────────────────────────────────┤
-│  Native Shell: Android 7.0+ (API 24 to API 34)         │
-│  WebView: HTTPS Local Scheme (https://localhost)       │
-│  Hardware Integrations:                                │
-│    - Native Status Bar (Dark Theme #101318)            │
-│    - Hardware Back-Button Trap & Navigation Handler    │
-│    - Network Offline/Online Listener                   │
-│    - Deep Linking Handler (in.disha.app://)            │
-│    - In-App Auto-Updater & SHA-256 Checksum Verifier   │
-├────────────────────────────────────────────────────────┤
-│  Frontend Core: React 19 + Tailwind CSS + Leaflet GIS  │
-├────────────────────────────────────────────────────────┤
-│  Backend Integration: HTTPS REST API on Render         │
-│  (https://disha-platform.onrender.com)                 │
-└────────────────────────────────────────────────────────┘
-```
-
-- **Application ID:** `in.disha.app`
-- **Application Name:** `DISHA`
-- **Minimum SDK:** API 24 (Android 7.0 Nougat)
-- **Target SDK:** API 34 (Android 14)
-- **Theme:** Consistent dark command palette (`#101318`, `#0B0F17`, Orange `#EA580C`)
-
-### 2. Login-First Security Enforcement on Android
-
-In contrast to the public web application where unauthenticated visitors can browse the landing page map:
-1. **Login is Always the First Screen on Android:** Upon opening the Android app, if no verified user session exists, the app renders directly into the DISHA Login page (`AuthPage`). The landing page and dashboard are strictly inaccessible until authentication completes.
-2. **Back-Button Guard:** The hardware back button on the login screen exits the app instead of navigating back into protected dashboard views.
-3. **Session Persistence:** Valid sessions and JWT tokens are securely maintained across app restarts.
-4. **Logout Flow:** Triggering "Sign Out" immediately revokes the session and redirects back to the login screen.
-5. **Web Application Unaffected:** The web application at `disha-platform.vercel.app` preserves its open public landing page and interactive map.
-
-### 3. Local Android Setup & Android Studio
-
-#### Prerequisites:
-- **Node.js:** v18+ or v20+
-- **JDK:** Java 17 or Java 21 (Temurin or Oracle)
-- **Android Studio:** Hedgehog (2023.1.1) or newer
-- **Android SDK:** Platforms 34 and 33, Android Build-Tools 34.0.0
-
-#### Running the App in Android Studio:
-```bash
-# 1. Navigate to frontend directory and install dependencies
-cd FRONTEND
-npm install
-
-# 2. Build the React production web bundle
-npm run build
-
-# 3. Synchronize web assets with the native Android project
-npm run cap:sync
-
-# 4. Open the project in Android Studio
-npm run cap:open
-```
-In Android Studio:
-- Select an Android Virtual Device (AVD) or connect a physical phone via USB debugging.
-- Click **Run 'app'** (`Shift + F10`).
-
-### 4. How to Build the APK Locally
-
-From the command line (requires Android SDK and Java installed):
-```bash
-cd FRONTEND/android
-
-# Build Debug APK
-./gradlew assembleDebug
-
-# Build Release APK
-./gradlew assembleRelease
-```
-The compiled APK will be output at:
-`FRONTEND/android/app/build/outputs/apk/release/app-release-unsigned.apk`
-
-### 5. Keystore Generation & APK Signing
-
-To generate a production signing key:
-```bash
-keytool -genkeypair -v \
-  -keystore disha-release.keystore \
-  -alias disha \
-  -keyalg RSA \
-  -keysize 2048 \
-  -validity 10000 \
-  -storepass YOUR_SECURE_PASSWORD \
-  -keypass YOUR_SECURE_PASSWORD \
-  -dname "CN=DISHA Platform, OU=Disaster Intelligence, O=DISHA Team, L=New Delhi, ST=Delhi, C=IN"
-```
-
-To encode the keystore for GitHub Actions Secrets:
-```bash
-# Linux / macOS:
-base64 -w 0 disha-release.keystore > keystore_base64.txt
-
-# Windows PowerShell:
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("disha-release.keystore")) | Out-File -Encoding utf8 keystore_base64.txt
-```
-
-> **Security Note:** Never commit `*.keystore` or `*.jks` files to the repository. They are ignored by `.gitignore`.
-
-### 6. GitHub Actions Automated Build & Release Pipeline
-
-The automated release workflow is configured in [`.github/workflows/android-release.yml`](./.github/workflows/android-release.yml).
-
-#### Trigger:
-- **Automatic:** Pushes or merges to the `main` branch affecting frontend code or release configs.
-- **Manual:** Can be run at any time via GitHub Actions **Run workflow** (`workflow_dispatch`).
-
-#### Required GitHub Secrets:
-Configure the following in **GitHub Repository Settings → Secrets and variables → Actions**:
-
-| Secret Name | Required | Purpose | Example / Description |
-|-------------|----------|---------|-----------------------|
-| `ANDROID_KEYSTORE_BASE64` | Recommended | Base64-encoded release keystore file | Output from base64 encoding `disha-release.keystore` |
-| `ANDROID_KEYSTORE_PASSWORD`| Recommended | Keystore password | Password set during `keytool` generation |
-| `ANDROID_KEY_ALIAS` | Recommended | Key alias | `disha` |
-| `ANDROID_KEY_PASSWORD` | Recommended | Key password | Key password set during generation |
-| `GITHUB_TOKEN` | Automatic | GitHub-provided token for publishing releases | Managed automatically by GitHub Actions |
-
-*Note: If signing secrets are not yet configured in GitHub, the workflow automatically generates a temporary secure build keystore so that valid, installable release APKs are always produced without failing.*
-
-### 7. Automatic In-App Update System
-
-The Android application includes an automated update system that checks for new releases:
-1. **Source of Truth:** Checks [`version-manifest.json`](./version-manifest.json) published as a GitHub Release asset on `https://github.com/Chitransh-22/DISHA-platform/releases/latest`.
-2. **Frequency:** Checked automatically upon app launch and every time the app resumes to the foreground.
-3. **Integrity:** The app verifies the downloaded APK against the published **SHA-256** checksum before initiating installation.
-4. **Update UI:** A DISHA-styled modal displays the new version number, release notes, and download progress bar.
-5. **Dismissal Memory:** Optional updates can be dismissed without repeatedly nagging the user.
-
-### 8. Website "Download APK" Button
-
-A visible "Download Android App" button is integrated into the DISHA web application in:
-- **Hero Section:** Positioned alongside primary action buttons.
-- **Top Navigation Bar:** Positioned in desktop and mobile header menus.
-
-The button dynamically queries the GitHub Releases API and `version-manifest.json` to deliver the latest compiled APK, showing a version badge (`v1.0.0`) and falling back gracefully to the official GitHub Releases page if a release is pending.
-
-### 9. Android Troubleshooting
-
-- **"App not installed" / "Parse Error":**
-  Ensure your Android device runs Android 7.0+ (API 24+). If upgrading from a debug build to a release build, uninstall the debug build first due to Android signature protection.
-- **"Install unknown apps" prompt:**
-  Android requires explicit user permission to install APK updates directly from DISHA. In Android Settings → Apps → Special app access → Install unknown apps, enable permission for DISHA.
-- **Google Sign-In in Android App:**
-  OAuth is performed via Chrome Custom Tabs (`@capacitor/browser`), returning to the app via custom scheme `in.disha.app://` or verified app link `https://disha-platform.vercel.app/auth/google/success`. Ensure your Google Cloud Console OAuth 2.0 Client credentials authorize `https://disha-platform.onrender.com` as the redirect URI.
+DISHA is a student / hackathon-style project provided "as is". Its information is aggregated from third-party sources and processed partly by an automated language model; it may be delayed, incomplete, mislocated or wrong. Do not rely on it for emergency decisions. In an emergency, contact local emergency services (112 in India) and follow instructions from NDMA, IMD, NCS and your local authorities. Safety tips shown in the frontend are static text maintained in the codebase, not live official guidance.
