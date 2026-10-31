@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Smartphone, Download, Loader2, ExternalLink } from 'lucide-react';
+import { Smartphone, Download, Loader2 } from 'lucide-react';
 import { isNativePlatform, openExternalUrl } from '../../services/nativeService';
 
 const GITHUB_OWNER = 'Chitransh-22';
@@ -20,7 +20,6 @@ export const DownloadApkButton = ({ variant = 'hero', className = '' }) => {
 
     const fetchLatestRelease = async () => {
       try {
-        // Try version-manifest.json first, then GitHub Releases API
         const manifestUrls = [
           `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/version-manifest.json`,
           `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
@@ -84,25 +83,45 @@ export const DownloadApkButton = ({ variant = 'hero', className = '' }) => {
     }
   };
 
-  // ─── Navbar Variant ────────────────────────────────────────────────────────
+  // ─── Header Navbar Variant (Compact & Reduced Text for Responsiveness) ─────
   if (variant === 'navbar') {
     return (
       <button
         id="navbar-download-apk-btn"
         onClick={handleDownload}
-        title={releaseInfo ? `Download DISHA Android APK (v${releaseInfo.versionName})` : 'DISHA Android Release'}
-        className={`group relative flex items-center gap-1.5 px-3 py-1.5 lg:py-2 rounded-full text-xs font-semibold bg-white/10 hover:bg-white/15 text-slate-100 hover:text-white border border-white/20 transition-all cursor-pointer whitespace-nowrap shadow-xs hover:border-orange-500/40 ${className}`}
+        title={releaseInfo ? `Download DISHA Android APK (v${releaseInfo.versionName})` : 'Download DISHA Android APK'}
+        className={`group relative flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-semibold bg-white/10 hover:bg-orange-500/20 text-slate-200 hover:text-white border border-white/15 hover:border-orange-500/40 transition-all cursor-pointer whitespace-nowrap shadow-xs shrink-0 active:scale-95 ${className}`}
       >
-        <Smartphone className="w-3.5 h-3.5 text-orange-400 group-hover:scale-110 transition-transform" />
-        <span>Android App</span>
+        <Smartphone className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-orange-400 group-hover:scale-110 transition-transform shrink-0" />
+        <span className="font-semibold tracking-wide">APK</span>
+        {loading && (
+          <Loader2 className="w-2.5 h-2.5 sm:w-3 sm:h-3 animate-spin text-orange-400 shrink-0" />
+        )}
+      </button>
+    );
+  }
+
+  // ─── Mobile Drawer Variant (Full-width for Mobile Dropdown Menu) ───────────
+  if (variant === 'drawer') {
+    return (
+      <button
+        id="drawer-download-apk-btn"
+        onClick={handleDownload}
+        disabled={downloading}
+        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:bg-white/15 text-slate-200 hover:text-white border border-white/10 transition-all cursor-pointer text-xs sm:text-sm font-medium ${className}`}
+      >
+        <div className="flex items-center gap-2.5">
+          <Smartphone className="w-4 h-4 text-orange-400 shrink-0" />
+          <span>{downloading ? 'Starting APK download…' : 'Download Android App (APK)'}</span>
+        </div>
         {loading ? (
-          <Loader2 className="w-3 h-3 animate-spin text-orange-400" />
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-400 shrink-0" />
         ) : releaseInfo?.versionName ? (
-          <span className="text-[10px] bg-orange-500/20 text-orange-300 px-1.5 py-0.2 rounded-full font-mono border border-orange-500/30">
+          <span className="text-[10px] bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded-full font-mono border border-orange-500/30 shrink-0">
             v{releaseInfo.versionName}
           </span>
         ) : (
-          <span className="text-[9px] bg-slate-700/60 text-slate-300 px-1.5 py-0.2 rounded-full font-mono">
+          <span className="text-[10px] bg-white/10 text-slate-400 px-2 py-0.5 rounded-full font-mono shrink-0">
             APK
           </span>
         )}
@@ -110,33 +129,29 @@ export const DownloadApkButton = ({ variant = 'hero', className = '' }) => {
     );
   }
 
-  // ─── Hero Section Variant ──────────────────────────────────────────────────
+  // ─── Hero Section Variant (App Brand Theme: Orange/Amber Gradient, Medium Text) ─
   return (
     <div className={`relative inline-flex flex-col items-center ${className}`}>
       <button
         id="hero-download-apk-btn"
         onClick={handleDownload}
         disabled={downloading}
-        className="group relative flex items-center gap-2.5 bg-linear-to-r from-slate-900 to-slate-950 hover:from-slate-800 hover:to-slate-900 text-white font-semibold text-xs sm:text-sm py-2.5 sm:py-3 px-5 sm:px-6 rounded-full border border-orange-500/40 hover:border-orange-500 shadow-md shadow-orange-950/30 hover:shadow-orange-500/20 active:scale-95 transition-all duration-200 cursor-pointer backdrop-blur-md"
+        className="group relative flex items-center gap-2.5 bg-linear-to-r from-[#f26522] to-[#ea580c] hover:from-[#ea580c] hover:to-[#c2410c] text-white font-semibold text-xs sm:text-sm py-2.5 sm:py-3 px-6 sm:px-7 rounded-full border border-orange-400/40 hover:border-orange-300 shadow-lg shadow-orange-950/25 hover:shadow-orange-500/30 hover:-translate-y-0.5 active:scale-95 transition-all duration-200 cursor-pointer"
       >
         {downloading ? (
-          <Loader2 className="w-4 h-4 text-orange-400 animate-spin" />
+          <Loader2 className="w-4 h-4 text-white animate-spin shrink-0" />
         ) : (
-          <Smartphone className="w-4 h-4 text-orange-400 group-hover:scale-110 transition-transform" />
+          <Smartphone className="w-4 h-4 text-white group-hover:scale-110 transition-transform shrink-0" />
         )}
-        <span className="flex items-center gap-1.5">
-          <span>{downloading ? 'Downloading APK…' : 'Download Android App'}</span>
-          {releaseInfo?.versionName ? (
-            <span className="text-[10px] bg-orange-500/20 text-orange-300 border border-orange-500/40 px-2 py-0.5 rounded-full font-mono">
+        <span className="flex items-center gap-2">
+          <span>{downloading ? 'Downloading APK…' : 'Download APK'}</span>
+          {releaseInfo?.versionName && (
+            <span className="text-[10px] bg-white/20 text-white border border-white/30 px-2 py-0.5 rounded-full font-mono font-medium">
               v{releaseInfo.versionName}
-            </span>
-          ) : (
-            <span className="text-[10px] bg-white/10 text-slate-300 border border-white/20 px-2 py-0.5 rounded-full font-mono">
-              APK
             </span>
           )}
         </span>
-        <Download className="w-3.5 h-3.5 text-slate-400 group-hover:text-white transition-colors" />
+        <Download className="w-3.5 h-3.5 text-orange-100 group-hover:text-white group-hover:translate-y-0.5 transition-all shrink-0" />
       </button>
 
       {statusMsg && (

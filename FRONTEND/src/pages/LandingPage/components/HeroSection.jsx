@@ -544,81 +544,11 @@ export const HeroSection = ({ onNavigate }) => {
             with intelligent updates across India and neighbouring countries.
           </motion.p>
 
-          {/* ACTION BUTTONS (SEAMLESSLY INTEGRATED) */}
+          {/* OFFICIAL ANDROID APK CTA */}
           <motion.div
             variants={fadeUpVariants}
-            className="flex flex-wrap items-center justify-center gap-3 mt-6 sm:mt-7 w-full z-30"
+            className="flex items-center justify-center mt-6 sm:mt-7 w-full z-30"
           >
-            {/* Primary CTA: Explore Live Map */}
-            <button
-              id="hero-explore-map-btn"
-              onClick={scrollToMap}
-              className="
-                bg-linear-to-r
-                from-[#f26522]
-                to-[#ea580c]
-                hover:from-[#ea580c]
-                hover:to-[#c2410c]
-                text-white
-                font-bold
-                text-xs
-                sm:text-sm
-                py-2.5
-                sm:py-3
-                px-5
-                sm:px-6
-                rounded-full
-                shadow-md
-                shadow-orange-950/25
-                hover:shadow-orange-500/20
-                flex
-                items-center
-                gap-2
-                cursor-pointer
-                active:scale-95
-                hover:-translate-y-0.5
-                transition-all
-                duration-200
-                border
-                border-orange-400/30
-              "
-            >
-              <span>🗺️ Explore Live Map</span>
-            </button>
-
-            {/* Secondary CTA: Report Incident */}
-            <button
-              id="hero-report-incident-btn"
-              onClick={() => onNavigate && onNavigate('report')}
-              className="
-                bg-white/10
-                hover:bg-white/20
-                text-white
-                font-semibold
-                text-xs
-                sm:text-sm
-                py-2.5
-                sm:py-3
-                px-5
-                sm:px-6
-                rounded-full
-                border
-                border-white/25
-                hover:border-white/40
-                flex
-                items-center
-                gap-2
-                cursor-pointer
-                active:scale-95
-                hover:-translate-y-0.5
-                transition-all
-                duration-200
-                backdrop-blur-xs
-              "
-            >
-              <span>🚨 Report Incident</span>
-            </button>
-            {/* Official Android App APK Download CTA */}
             <DownloadApkButton variant="hero" />
           </motion.div>
         </motion.div>
