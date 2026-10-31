@@ -64,6 +64,7 @@ dist-ssr/
 
 # Android & Capacitor Artifacts
 *.apk
+!FRONTEND/public/*.apk
 *.aab
 *.keystore
 *.jks
