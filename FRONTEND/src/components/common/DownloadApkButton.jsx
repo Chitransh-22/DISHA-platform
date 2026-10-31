@@ -1,10 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { Smartphone, Download, Loader2 } from 'lucide-react';
-import { isNativePlatform, openExternalUrl } from '../../services/nativeService';
+import { Smartphone, Download, Loader2, CheckCircle2 } from 'lucide-react';
+import { isNativePlatform } from '../../services/nativeService';
 
 const GITHUB_OWNER = 'Chitransh-22';
 const GITHUB_REPO = 'DISHA-platform';
-const RELEASES_PAGE_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases`;
+// Direct release download asset URL
+const DEFAULT_APK_DOWNLOAD_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest/download/disha-release.apk`;
+
+/**
+ * Triggers a native file download in the browser without top-level page navigation.
+ */
+function triggerBrowserDownload(url, fileName = 'disha-release.apk') {
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', fileName);
+  link.setAttribute('target', '_blank');
+  link.rel = 'noopener noreferrer';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => {
+    try {
+      document.body.removeChild(link);
+    } catch (e) {}
+  }, 500);
+}
 
 export const DownloadApkButton = ({ variant = 'hero', className = '' }) => {
   // If running inside the native Android app, hide the download button
@@ -14,19 +33,22 @@ export const DownloadApkButton = ({ variant = 'hero', className = '' }) => {
   const [releaseInfo, setReleaseInfo] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
+  const [statusType, setStatusType] = useState('info'); // 'info' | 'success'
 
   useEffect(() => {
     let isMounted = true;
 
     const fetchLatestRelease = async () => {
       try {
-        const manifestUrls = [
+        let found = null;
+
+        // 1. Check local /version-manifest.json or remote manifest
+        const manifestSources = [
+          '/version-manifest.json',
           `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/version-manifest.json`,
-          `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
         ];
 
-        let found = null;
-        for (const url of manifestUrls) {
+        for (const url of manifestSources) {
           try {
             const res = await fetch(url, { cache: 'no-cache' });
             if (res.ok) {
@@ -37,26 +59,48 @@ export const DownloadApkButton = ({ variant = 'hero', className = '' }) => {
                   apkUrl: data.apkUrl,
                 };
                 break;
-              } else if (data.tag_name) {
-                const apk = (data.assets || []).find((a) => a.name && a.name.endsWith('.apk'));
-                if (apk) {
-                  found = {
-                    versionName: data.tag_name.replace(/^v/, ''),
-                    apkUrl: apk.browser_download_url,
-                  };
-                  break;
-                }
               }
             }
           } catch (e) {}
         }
 
+        // 2. Query GitHub Releases API to see if a verified release asset exists
+        try {
+          const apiRes = await fetch(
+            `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+            { cache: 'no-cache' }
+          );
+          if (apiRes.ok) {
+            const releaseData = await apiRes.json();
+            const apkAsset = (releaseData.assets || []).find(
+              (a) => a.name && a.name.endsWith('.apk')
+            );
+            if (apkAsset && apkAsset.browser_download_url) {
+              found = {
+                versionName: releaseData.tag_name ? releaseData.tag_name.replace(/^v/, '') : '1.0.0',
+                apkUrl: apkAsset.browser_download_url,
+              };
+            }
+          }
+        } catch (e) {}
+
         if (isMounted) {
-          setReleaseInfo(found);
+          setReleaseInfo(
+            found || {
+              versionName: '1.0.0',
+              apkUrl: DEFAULT_APK_DOWNLOAD_URL,
+            }
+          );
           setLoading(false);
         }
       } catch (err) {
-        if (isMounted) setLoading(false);
+        if (isMounted) {
+          setReleaseInfo({
+            versionName: '1.0.0',
+            apkUrl: DEFAULT_APK_DOWNLOAD_URL,
+          });
+          setLoading(false);
+        }
       }
     };
 
@@ -69,18 +113,27 @@ export const DownloadApkButton = ({ variant = 'hero', className = '' }) => {
 
   const handleDownload = (e) => {
     e.preventDefault();
-    if (releaseInfo?.apkUrl) {
-      setDownloading(true);
-      setStatusMsg('Starting download…');
-      window.location.href = releaseInfo.apkUrl;
-      setTimeout(() => {
-        setDownloading(false);
-        setStatusMsg(null);
-      }, 4000);
-    } else {
-      // If release APK not yet published, open official GitHub Releases page
-      openExternalUrl(RELEASES_PAGE_URL);
-    }
+    if (downloading) return;
+
+    setDownloading(true);
+    setStatusType('info');
+    setStatusMsg('Initiating APK download…');
+
+    const downloadUrl = releaseInfo?.apkUrl || DEFAULT_APK_DOWNLOAD_URL;
+    const fileName = `disha-v${releaseInfo?.versionName || '1.0.0'}.apk`;
+
+    // Trigger file download using native browser anchor download attribute
+    triggerBrowserDownload(downloadUrl, fileName);
+
+    setTimeout(() => {
+      setStatusType('success');
+      setStatusMsg('Download started! Check your browser downloads.');
+      setDownloading(false);
+    }, 1500);
+
+    setTimeout(() => {
+      setStatusMsg(null);
+    }, 6000);
   };
 
   // ─── Header Navbar Variant (Compact & Reduced Text for Responsiveness) ─────
@@ -93,7 +146,7 @@ export const DownloadApkButton = ({ variant = 'hero', className = '' }) => {
         className={`group relative flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-semibold bg-white/10 hover:bg-orange-500/20 text-slate-200 hover:text-white border border-white/15 hover:border-orange-500/40 transition-all cursor-pointer whitespace-nowrap shadow-xs shrink-0 active:scale-95 ${className}`}
       >
         <Smartphone className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-orange-400 group-hover:scale-110 transition-transform shrink-0" />
-        <span className="font-semibold tracking-wide">APK</span>
+        <span className="font-semibold tracking-wide">{downloading ? 'Downloading…' : 'APK'}</span>
         {loading && (
           <Loader2 className="w-2.5 h-2.5 sm:w-3 sm:h-3 animate-spin text-orange-400 shrink-0" />
         )}
@@ -144,7 +197,7 @@ export const DownloadApkButton = ({ variant = 'hero', className = '' }) => {
           <Smartphone className="w-4 h-4 text-white group-hover:scale-110 transition-transform shrink-0" />
         )}
         <span className="flex items-center gap-2">
-          <span>{downloading ? 'Downloading APK…' : 'Download APK'}</span>
+          <span>{downloading ? 'Starting Download…' : 'Download APK'}</span>
           {releaseInfo?.versionName && (
             <span className="text-[10px] bg-white/20 text-white border border-white/30 px-2 py-0.5 rounded-full font-mono font-medium">
               v{releaseInfo.versionName}
@@ -155,7 +208,12 @@ export const DownloadApkButton = ({ variant = 'hero', className = '' }) => {
       </button>
 
       {statusMsg && (
-        <span className="absolute -bottom-5 text-[10px] text-orange-400 animate-fade-in font-medium">
+        <span
+          className={`absolute -bottom-6 text-[10.5px] font-medium whitespace-nowrap flex items-center gap-1 transition-all ${
+            statusType === 'success' ? 'text-emerald-400' : 'text-orange-400'
+          }`}
+        >
+          {statusType === 'success' && <CheckCircle2 className="w-3 h-3 text-emerald-400 inline" />}
           {statusMsg}
         </span>
       )}

@@ -1,0 +1,14 @@
+{
+  "appName": "DISHA",
+  "applicationId": "in.disha.app",
+  "versionCode": 1,
+  "versionName": "1.0.0",
+  "releaseDate": "2026-10-31",
+  "publishedAt": "2026-10-31T14:30:00Z",
+  "releaseNotes": "Official release of the DISHA Android Application. Features live OpenStreetMap GIS hazard monitoring, NDMA SACHET alert tracking, NCS earthquake telemetry, emergency services overlay, and secure verified responder authentication.",
+  "apkUrl": "https://github.com/Chitransh-22/DISHA-platform/releases/latest/download/disha-release.apk",
+  "sha256": "",
+  "isMandatory": false,
+  "minSdkVersion": 24,
+  "targetSdkVersion": 34
+}

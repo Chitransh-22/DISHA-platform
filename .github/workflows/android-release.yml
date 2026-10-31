@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - frontend
     paths:
       - 'FRONTEND/**'
       - '.github/workflows/android-release.yml'
@@ -56,8 +57,11 @@ jobs:
           distribution: 'temurin'
           java-version: 17
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Android SDK Environment
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}" >> $GITHUB_ENV
+          yes | sdkmanager --licenses 2>/dev/null || true
 
       - name: Determine Version Code & Name
         id: versioning
