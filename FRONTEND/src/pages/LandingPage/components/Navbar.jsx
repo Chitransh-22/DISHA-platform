@@ -252,7 +252,7 @@ export const Navbar = ({
               <span
                 className="
                   hidden
-                  min-[900px]:flex
+                  min-[1150px]:flex
                   items-center
                   ml-2
                   lg:ml-2.5
@@ -722,11 +722,12 @@ export const Navbar = ({
               hidden
               min-[900px]:flex
               items-center
+              gap-2
               shrink-0
             "
           >
 
-            <DownloadApkButton variant="navbar" className="mr-2" />
+            <DownloadApkButton variant="navbar" />
             {isLoggedIn ? (
               <div className="flex items-center gap-2">
                 <button
@@ -908,7 +909,7 @@ export const Navbar = ({
 
             {/* COMPACT SIGN IN / USER BADGE */}
 
-            <DownloadApkButton variant="navbar" className="mr-2" />
+            <DownloadApkButton variant="navbar" className="hidden min-[380px]:flex" />
             {isLoggedIn ? (
               <button
                 id="nav-mobile-user-btn"
@@ -1311,7 +1312,7 @@ export const Navbar = ({
 
             {/* FULL AUTH */}
 
-            <DownloadApkButton variant="navbar" className="mr-2" />
+            <DownloadApkButton variant="drawer" className="mt-2" />
             {isLoggedIn ? (
               <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-white/10">
                 <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm font-semibold">
