@@ -74,9 +74,9 @@ export const HeroSection = ({ onNavigate }) => {
         overflow-hidden
         px-3
         sm:px-6
-        pt-16
-        sm:pt-20
-        lg:pt-22
+        pt-28
+        sm:pt-32
+        lg:pt-36
         pb-4
         sm:pb-8
         mt-2
