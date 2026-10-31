@@ -345,3 +345,162 @@ Please read the full [`LICENSE`](./LICENSE) file before using, referencing, or b
 - Emergency-services lookup depends on OpenStreetMap/Overpass data completeness, which varies by region and may be incomplete for some areas of India.
 - No automated test pipeline (CI) is currently configured, even though a `pytest` test suite exists under `BACKEND/tests/`.
 - Geocoding for SACHET/news events without explicit coordinates falls back to state/district **centroid approximation**, not precise location data.
+
+---
+
+## DISHA Android Native Application
+
+The DISHA platform is packaged as a native Android application using **Capacitor 8**, providing an installable, high-performance mobile client while preserving 100% of the existing React/Vite web application.
+
+### 1. Android Application Architecture
+
+```
+┌────────────────────────────────────────────────────────┐
+│                   DISHA Android App                    │
+│                 Package: in.disha.app                  │
+├────────────────────────────────────────────────────────┤
+│  Native Shell: Android 7.0+ (API 24 to API 34)         │
+│  WebView: HTTPS Local Scheme (https://localhost)       │
+│  Hardware Integrations:                                │
+│    - Native Status Bar (Dark Theme #101318)            │
+│    - Hardware Back-Button Trap & Navigation Handler    │
+│    - Network Offline/Online Listener                   │
+│    - Deep Linking Handler (in.disha.app://)            │
+│    - In-App Auto-Updater & SHA-256 Checksum Verifier   │
+├────────────────────────────────────────────────────────┤
+│  Frontend Core: React 19 + Tailwind CSS + Leaflet GIS  │
+├────────────────────────────────────────────────────────┤
+│  Backend Integration: HTTPS REST API on Render         │
+│  (https://disha-platform.onrender.com)                 │
+└────────────────────────────────────────────────────────┘
+```
+
+- **Application ID:** `in.disha.app`
+- **Application Name:** `DISHA`
+- **Minimum SDK:** API 24 (Android 7.0 Nougat)
+- **Target SDK:** API 34 (Android 14)
+- **Theme:** Consistent dark command palette (`#101318`, `#0B0F17`, Orange `#EA580C`)
+
+### 2. Login-First Security Enforcement on Android
+
+In contrast to the public web application where unauthenticated visitors can browse the landing page map:
+1. **Login is Always the First Screen on Android:** Upon opening the Android app, if no verified user session exists, the app renders directly into the DISHA Login page (`AuthPage`). The landing page and dashboard are strictly inaccessible until authentication completes.
+2. **Back-Button Guard:** The hardware back button on the login screen exits the app instead of navigating back into protected dashboard views.
+3. **Session Persistence:** Valid sessions and JWT tokens are securely maintained across app restarts.
+4. **Logout Flow:** Triggering "Sign Out" immediately revokes the session and redirects back to the login screen.
+5. **Web Application Unaffected:** The web application at `disha-platform.vercel.app` preserves its open public landing page and interactive map.
+
+### 3. Local Android Setup & Android Studio
+
+#### Prerequisites:
+- **Node.js:** v18+ or v20+
+- **JDK:** Java 17 or Java 21 (Temurin or Oracle)
+- **Android Studio:** Hedgehog (2023.1.1) or newer
+- **Android SDK:** Platforms 34 and 33, Android Build-Tools 34.0.0
+
+#### Running the App in Android Studio:
+```bash
+# 1. Navigate to frontend directory and install dependencies
+cd FRONTEND
+npm install
+
+# 2. Build the React production web bundle
+npm run build
+
+# 3. Synchronize web assets with the native Android project
+npm run cap:sync
+
+# 4. Open the project in Android Studio
+npm run cap:open
+```
+In Android Studio:
+- Select an Android Virtual Device (AVD) or connect a physical phone via USB debugging.
+- Click **Run 'app'** (`Shift + F10`).
+
+### 4. How to Build the APK Locally
+
+From the command line (requires Android SDK and Java installed):
+```bash
+cd FRONTEND/android
+
+# Build Debug APK
+./gradlew assembleDebug
+
+# Build Release APK
+./gradlew assembleRelease
+```
+The compiled APK will be output at:
+`FRONTEND/android/app/build/outputs/apk/release/app-release-unsigned.apk`
+
+### 5. Keystore Generation & APK Signing
+
+To generate a production signing key:
+```bash
+keytool -genkeypair -v \
+  -keystore disha-release.keystore \
+  -alias disha \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000 \
+  -storepass YOUR_SECURE_PASSWORD \
+  -keypass YOUR_SECURE_PASSWORD \
+  -dname "CN=DISHA Platform, OU=Disaster Intelligence, O=DISHA Team, L=New Delhi, ST=Delhi, C=IN"
+```
+
+To encode the keystore for GitHub Actions Secrets:
+```bash
+# Linux / macOS:
+base64 -w 0 disha-release.keystore > keystore_base64.txt
+
+# Windows PowerShell:
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("disha-release.keystore")) | Out-File -Encoding utf8 keystore_base64.txt
+```
+
+> **Security Note:** Never commit `*.keystore` or `*.jks` files to the repository. They are ignored by `.gitignore`.
+
+### 6. GitHub Actions Automated Build & Release Pipeline
+
+The automated release workflow is configured in [`.github/workflows/android-release.yml`](./.github/workflows/android-release.yml).
+
+#### Trigger:
+- **Automatic:** Pushes or merges to the `main` branch affecting frontend code or release configs.
+- **Manual:** Can be run at any time via GitHub Actions **Run workflow** (`workflow_dispatch`).
+
+#### Required GitHub Secrets:
+Configure the following in **GitHub Repository Settings → Secrets and variables → Actions**:
+
+| Secret Name | Required | Purpose | Example / Description |
+|-------------|----------|---------|-----------------------|
+| `ANDROID_KEYSTORE_BASE64` | Recommended | Base64-encoded release keystore file | Output from base64 encoding `disha-release.keystore` |
+| `ANDROID_KEYSTORE_PASSWORD`| Recommended | Keystore password | Password set during `keytool` generation |
+| `ANDROID_KEY_ALIAS` | Recommended | Key alias | `disha` |
+| `ANDROID_KEY_PASSWORD` | Recommended | Key password | Key password set during generation |
+| `GITHUB_TOKEN` | Automatic | GitHub-provided token for publishing releases | Managed automatically by GitHub Actions |
+
+*Note: If signing secrets are not yet configured in GitHub, the workflow automatically generates a temporary secure build keystore so that valid, installable release APKs are always produced without failing.*
+
+### 7. Automatic In-App Update System
+
+The Android application includes an automated update system that checks for new releases:
+1. **Source of Truth:** Checks [`version-manifest.json`](./version-manifest.json) published as a GitHub Release asset on `https://github.com/Chitransh-22/DISHA-platform/releases/latest`.
+2. **Frequency:** Checked automatically upon app launch and every time the app resumes to the foreground.
+3. **Integrity:** The app verifies the downloaded APK against the published **SHA-256** checksum before initiating installation.
+4. **Update UI:** A DISHA-styled modal displays the new version number, release notes, and download progress bar.
+5. **Dismissal Memory:** Optional updates can be dismissed without repeatedly nagging the user.
+
+### 8. Website "Download APK" Button
+
+A visible "Download Android App" button is integrated into the DISHA web application in:
+- **Hero Section:** Positioned alongside primary action buttons.
+- **Top Navigation Bar:** Positioned in desktop and mobile header menus.
+
+The button dynamically queries the GitHub Releases API and `version-manifest.json` to deliver the latest compiled APK, showing a version badge (`v1.0.0`) and falling back gracefully to the official GitHub Releases page if a release is pending.
+
+### 9. Android Troubleshooting
+
+- **"App not installed" / "Parse Error":**
+  Ensure your Android device runs Android 7.0+ (API 24+). If upgrading from a debug build to a release build, uninstall the debug build first due to Android signature protection.
+- **"Install unknown apps" prompt:**
+  Android requires explicit user permission to install APK updates directly from DISHA. In Android Settings → Apps → Special app access → Install unknown apps, enable permission for DISHA.
+- **Google Sign-In in Android App:**
+  OAuth is performed via Chrome Custom Tabs (`@capacitor/browser`), returning to the app via custom scheme `in.disha.app://` or verified app link `https://disha-platform.vercel.app/auth/google/success`. Ensure your Google Cloud Console OAuth 2.0 Client credentials authorize `https://disha-platform.onrender.com` as the redirect URI.

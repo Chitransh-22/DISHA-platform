@@ -4,6 +4,7 @@ import {
   Radio, MapPin, Activity, ExternalLink
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { isNativePlatform } from '../services/nativeService';
 
 // ─── Google Sign-In Button ───────────────────────────────────────────────────
 const GoogleButton = ({ onClick, text = 'Continue with Google', disabled = false, loading = false }) => (
@@ -130,7 +131,7 @@ const SuccessScreen = ({ name, onNavigate, redirectTarget = 'report' }) => (
 );
 
 // ─── Main AuthPage ─────────────────────────────────────────────────────────────
-export const AuthPage = ({ onNavigate, onLoginSuccess, redirectTarget = 'landing' }) => {
+export const AuthPage = ({ onNavigate, onLoginSuccess, redirectTarget = 'landing', isLoggedIn = false }) => {
   const { googleLogin, authError, clearAuthError } = useAuth();
   const [screen, setScreen] = useState('signin');
   const [userName, setUserName] = useState('');
@@ -148,6 +149,7 @@ export const AuthPage = ({ onNavigate, onLoginSuccess, redirectTarget = 'landing
 
         {/* ── Header ── */}
         <div className="flex items-center gap-4 mb-8">
+          {(!isNativePlatform() || isLoggedIn) && (
           <button
             id="back-to-home-btn"
             onClick={() => onNavigate(redirectTarget || 'landing')}
@@ -156,6 +158,7 @@ export const AuthPage = ({ onNavigate, onLoginSuccess, redirectTarget = 'landing
             <ArrowLeft className="w-4 h-4" />
             <span>Back</span>
           </button>
+          )}
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-linear-to-br from-orange-400 to-red-500 flex items-center justify-center shadow-xs">
               <Shield className="w-4 h-4 text-white" />

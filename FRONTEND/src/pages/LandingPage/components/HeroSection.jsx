@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { heroRescueImg } from '../../../assets/images';
+import { DownloadApkButton } from '../../../components/common/DownloadApkButton';
 
 /* =========================================================
    ANIMATION VARIANTS
@@ -617,6 +618,8 @@ export const HeroSection = ({ onNavigate }) => {
             >
               <span>🚨 Report Incident</span>
             </button>
+            {/* Official Android App APK Download CTA */}
+            <DownloadApkButton variant="hero" />
           </motion.div>
         </motion.div>
       </div>
