@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+def resolvedVersionCode = ((project.findProperty('versionCode') ?: System.getenv('VERSION_CODE') ?: "1") as String).trim()
+if (!resolvedVersionCode) {
+    resolvedVersionCode = "1"
+}
+
+def resolvedVersionName = ((project.findProperty('versionName') ?: System.getenv('VERSION_NAME') ?: "1.0.0") as String).trim()
+if (!resolvedVersionName) {
+    resolvedVersionName = "1.0.0"
+}
+
+def keystoreFilePath = System.getenv("KEYSTORE_FILE")
+def keystoreStorePassword = System.getenv("KEYSTORE_PASSWORD")
+def keystoreAlias = System.getenv("KEY_ALIAS")
+def keystoreKeyPassword = System.getenv("KEY_PASSWORD")
+def hasReleaseKeystore = keystoreFilePath && keystoreStorePassword && keystoreAlias && keystoreKeyPassword && file(keystoreFilePath).exists()
+
 android {
     namespace = "in.disha.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +23,8 @@ android {
         applicationId "in.disha.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode (project.findProperty('versionCode') ?: System.getenv('VERSION_CODE') ?: "1").toInteger()
-        versionName (project.findProperty('versionName') ?: System.getenv('VERSION_NAME') ?: "1.0.0")
+        versionCode = resolvedVersionCode.toInteger()
+        versionName = resolvedVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -19,11 +35,11 @@ android {
 
     signingConfigs {
         release {
-            if (System.getenv("KEYSTORE_FILE") && file(System.getenv("KEYSTORE_FILE")).exists()) {
-                storeFile file(System.getenv("KEYSTORE_FILE"))
-                storePassword System.getenv("KEYSTORE_PASSWORD")
-                keyAlias System.getenv("KEY_ALIAS")
-                keyPassword System.getenv("KEY_PASSWORD")
+            if (hasReleaseKeystore) {
+                storeFile file(keystoreFilePath)
+                storePassword keystoreStorePassword
+                keyAlias keystoreAlias
+                keyPassword keystoreKeyPassword
             }
         }
     }
@@ -32,7 +48,7 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            if (System.getenv("KEYSTORE_FILE") && file(System.getenv("KEYSTORE_FILE")).exists()) {
+            if (hasReleaseKeystore) {
                 signingConfig signingConfigs.release
             }
         }
